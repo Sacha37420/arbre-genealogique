@@ -43,7 +43,7 @@
           class="btn ghost toggle"
           [class.on]="graph()?.settings?.snap_to_grid"
           (click)="toggleSetting('snap_to_grid')"
-          title="Aimanter les cartes sur la grille (la ligne de génération est toujours aimantée ; Maj = placement libre)"
+          title="Aimanter aussi sur la grille horizontalement. Une carte n'est attirée par une ligne que si elle en passe près ; plus loin, elle reste libre et crée une nouvelle rangée. Maj = aucune aimantation."
         >
           Aimanter
         </button>

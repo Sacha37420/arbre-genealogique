@@ -7,6 +7,7 @@ import { ApiService } from '../../core/api.service';
 import {
   JUNCTION_SIZE,
   Positioned,
+  SnapResult,
   computeLayout,
   edgePath,
   isHorizontal,
@@ -235,13 +236,19 @@ export class TreeComponent {
       this.drag.moved = true;
 
       const free = { x: this.drag.originX + dx, y: this.drag.originY + dy };
-      // Maj enfoncée : placement libre, pour l'exception que l'aimantation empêcherait.
-      const position = event.shiftKey ? free : this.snap(free);
+
+      // Maj : aimantation désactivée d'un bout à l'autre du geste.
+      const snapped = event.shiftKey
+        ? { position: free, row: null }
+        : this.snap(free);
 
       const next = new Map(this.moved());
-      next.set(this.drag.key, position);
+      next.set(this.drag.key, snapped.position);
       this.moved.set(next);
-      this.guide.set(event.shiftKey ? null : this.guideFor(position));
+
+      // Le trait d'aide n'apparaît que si la carte est effectivement attirée :
+      // loin de toute ligne, elle suit librement la souris.
+      this.guide.set(snapped.row === null ? null : this.guideFor(snapped.row));
       return;
     }
 
@@ -253,11 +260,16 @@ export class TreeComponent {
     }
   }
 
-  /** Aimante une position sur la ligne de génération la plus proche, et sur la grille. */
-  private snap(position: Positioned): Positioned {
+  /**
+   * Aimante une position — seulement si elle passe assez près d'une ligne.
+   *
+   * Au-delà du rayon d'attraction, la carte reste où la souris la mène : c'est ce
+   * qui permet de la sortir des rangées existantes et d'en ouvrir une nouvelle.
+   */
+  private snap(position: Positioned): SnapResult {
     const layout = this.layout();
     const settings = this.graph()?.settings;
-    if (!layout || !settings) return position;
+    if (!layout || !settings) return { position, row: null };
 
     return snapPosition(position, {
       rows: layout.rows,
@@ -268,12 +280,12 @@ export class TreeComponent {
   }
 
   /** Trait d'aide montrant la ligne sur laquelle la carte va se poser. */
-  private guideFor(position: Positioned): { horizontal: boolean; at: number } | null {
+  private guideFor(row: number): { horizontal: boolean; at: number } | null {
     const settings = this.graph()?.settings;
     if (!settings) return null;
 
     const horizontal = isHorizontal(settings.orientation || 'TB');
-    return { horizontal: !horizontal, at: horizontal ? position.x : position.y };
+    return { horizontal: !horizontal, at: row };
   }
 
   onPointerUp(): void {

@@ -106,17 +106,30 @@ export function computeLayout(
   };
 }
 
+/**
+ * Distance (en unités du canevas) en deçà de laquelle une carte est attirée par
+ * une ligne.
+ *
+ * L'aimantation est une assistance, pas une contrainte : au-delà de ce rayon on
+ * place librement, ce qui permet de tirer une carte hors des rangées existantes
+ * pour en ouvrir une nouvelle.
+ */
+export const SNAP_RADIUS = 26;
+
+/** Deux lignes plus proches que cela sont la même : évite d'en empiler des quasi-jumelles. */
+const ROW_MERGE_TOLERANCE = 10;
+
 /** Est-on en orientation horizontale (les générations sont alors des colonnes) ? */
 export function isHorizontal(orientation: string): boolean {
   return orientation === 'LR' || orientation === 'RL';
 }
 
 /**
- * Lignes distinctes produites par dagre, dédupliquées.
+ * Lignes sur lesquelles une carte peut s'aimanter.
  *
- * On lit les positions calculées et non les positions épinglées : une carte
- * déplacée par l'utilisateur ne doit pas créer une nouvelle ligne d'aimantation,
- * sinon un écart accidentel se figerait en référence.
+ * Ce sont celles calculées par dagre **et** celles créées à la main : une carte
+ * épinglée hors des rangées ouvre une nouvelle ligne, à laquelle les suivantes
+ * pourront s'aligner. C'est le seul moyen de composer ses propres rangées.
  */
 function collectRows(
   graph: dagre.graphlib.Graph,
@@ -126,12 +139,17 @@ function collectRows(
   const axis = isHorizontal(orientation) ? 'x' : 'y';
   const rows: number[] = [];
 
-  for (const node of nodes) {
-    const computed = graph.node(`i${node.id}`) as Positioned | undefined;
-    if (!computed) continue;
+  const add = (value: number): void => {
+    if (!rows.some((row) => Math.abs(row - value) < ROW_MERGE_TOLERANCE)) rows.push(value);
+  };
 
-    const value = computed[axis];
-    if (!rows.some((row) => Math.abs(row - value) < 1)) rows.push(value);
+  for (const node of nodes) {
+    if (node.pinned) {
+      add(node[axis]);
+      continue;
+    }
+    const computed = graph.node(`i${node.id}`) as Positioned | undefined;
+    if (computed) add(computed[axis]);
   }
 
   return rows.sort((a, b) => a - b);
@@ -142,38 +160,57 @@ export interface SnapOptions {
   orientation: string;
   gridSize: number;
   snapToGrid: boolean;
+  /** Rayon d'attraction ; au-delà, la position reste libre. */
+  radius?: number;
+}
+
+export interface SnapResult {
+  position: Positioned;
+  /** Ligne sur laquelle la carte s'est posée, ou null si elle est restée libre. */
+  row: number | null;
 }
 
 /**
- * Aimante une position en cours de glissement.
+ * Aimante une position en cours de glissement — si elle est assez proche d'une ligne.
  *
- * L'axe des générations est aimanté sur la ligne la plus proche : une carte ne
- * peut donc plus dériver hors de sa rangée d'un coup de souris. L'autre axe suit
- * la grille, si elle est active.
+ * Loin de toute ligne, rien n'est corrigé sur l'axe des générations : la carte
+ * suit la souris, et l'endroit où on la lâche devient une nouvelle rangée.
  */
-export function snapPosition(position: Positioned, options: SnapOptions): Positioned {
+export function snapPosition(position: Positioned, options: SnapOptions): SnapResult {
   const horizontal = isHorizontal(options.orientation);
   const generationAxis = horizontal ? 'x' : 'y';
   const freeAxis = horizontal ? 'y' : 'x';
 
   const snapped: Positioned = { ...position };
 
-  const nearest = nearestRow(position[generationAxis], options.rows);
-  if (nearest !== null) snapped[generationAxis] = nearest;
+  const row = nearestRow(
+    position[generationAxis],
+    options.rows,
+    options.radius ?? SNAP_RADIUS,
+  );
+  if (row !== null) snapped[generationAxis] = row;
 
   if (options.snapToGrid && options.gridSize > 0) {
     snapped[freeAxis] = Math.round(position[freeAxis] / options.gridSize) * options.gridSize;
   }
 
-  return snapped;
+  return { position: snapped, row };
 }
 
-/** Ligne la plus proche, ou null si l'arbre n'en a aucune. */
-export function nearestRow(value: number, rows: number[]): number | null {
-  if (!rows.length) return null;
-  return rows.reduce((best, row) =>
-    Math.abs(row - value) < Math.abs(best - value) ? row : best,
-  );
+/** Ligne la plus proche dans le rayon donné, ou null s'il n'y en a aucune assez près. */
+export function nearestRow(value: number, rows: number[], radius = SNAP_RADIUS): number | null {
+  let best: number | null = null;
+  let bestDistance = radius;
+
+  for (const row of rows) {
+    const distance = Math.abs(row - value);
+    if (distance <= bestDistance) {
+      best = row;
+      bestDistance = distance;
+    }
+  }
+
+  return best;
 }
 
 /**
