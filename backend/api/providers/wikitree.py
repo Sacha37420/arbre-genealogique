@@ -90,6 +90,10 @@ class WikiTreeProvider(Provider):
         results = []
         for match in matches[: query.limit]:
             result = _profile_to_result(match)
+            # Un profil privé ne renvoie que son Id : sans nom, il n'est d'aucune
+            # aide à l'utilisateur et polluerait la liste des candidats.
+            if not result.full_name:
+                continue
             result.score = score_match(result, query)
             results.append(result)
         return sorted(results, key=lambda r: r.score, reverse=True)
