@@ -8,12 +8,16 @@ import { Edge, EdgeStyleSpec, FamilyNode, PersonCard, Timeline, TreeGraph } from
 import { TreeStore, describeError } from '../../core/tree-store';
 import { FullCardComponent } from '../../shared/cards/full-card.component';
 import { MiniCardComponent } from '../../shared/cards/mini-card.component';
+import { PersonEditorComponent } from '../../shared/cards/person-editor.component';
 
 interface RenderedEdge {
   id: string;
   path: string;
   style: EdgeStyleSpec;
 }
+
+/** En deçà de ce déplacement (en pixels écran), le geste est un clic, pas un glissement. */
+const DRAG_THRESHOLD_PX = 4;
 
 const DEFAULT_EDGE: EdgeStyleSpec = {
   color: '#b6c0cd',
@@ -27,7 +31,7 @@ const DEFAULT_EDGE: EdgeStyleSpec = {
 @Component({
   selector: 'app-tree',
   standalone: true,
-  imports: [FormsModule, MiniCardComponent, FullCardComponent],
+  imports: [FormsModule, MiniCardComponent, FullCardComponent, PersonEditorComponent],
   templateUrl: './tree.component.html',
   styleUrl: './tree.component.scss',
 })
@@ -42,6 +46,7 @@ export class TreeComponent {
 
   readonly selected = signal<PersonCard | null>(null);
   readonly timeline = signal<Timeline | null>(null);
+  readonly editing = signal(false);
 
   readonly zoom = signal(1);
   readonly pan = signal<Positioned>({ x: 0, y: 0 });
@@ -49,8 +54,18 @@ export class TreeComponent {
   /** Positions en cours de glissement, superposées à celles calculées. */
   private readonly moved = signal(new Map<string, Positioned>());
 
-  private drag: { key: string; startX: number; startY: number; originX: number; originY: number } | null = null;
+  private drag: {
+    key: string;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  } | null = null;
   private panning: { startX: number; startY: number; originX: number; originY: number } | null = null;
+
+  /** Un vrai glissement se termine par un « click » : il ne doit pas ouvrir la fiche. */
+  private suppressClick = false;
 
   readonly newPersonName = signal('');
   readonly busy = signal('');
@@ -191,6 +206,7 @@ export class TreeComponent {
       startY: event.clientY,
       originX: origin.x,
       originY: origin.y,
+      moved: false,
     };
     (event.target as HTMLElement).setPointerCapture(event.pointerId);
   }
@@ -201,6 +217,12 @@ export class TreeComponent {
     if (this.drag) {
       const dx = (event.clientX - this.drag.startX) / scale;
       const dy = (event.clientY - this.drag.startY) / scale;
+
+      // Un clic n'est jamais parfaitement immobile : en deçà du seuil, c'est un clic,
+      // pas un déplacement — sinon ouvrir une fiche épinglerait la carte au passage.
+      if (!this.drag.moved && Math.hypot(dx, dy) * scale < DRAG_THRESHOLD_PX) return;
+      this.drag.moved = true;
+
       const next = new Map(this.moved());
       next.set(this.drag.key, { x: this.drag.originX + dx, y: this.drag.originY + dy });
       this.moved.set(next);
@@ -217,18 +239,22 @@ export class TreeComponent {
 
   onPointerUp(): void {
     if (this.drag) {
-      const { key } = this.drag;
-      const position = this.positionOf(key);
-      const treeId = this.store.currentId();
+      const { key, moved } = this.drag;
       this.drag = null;
+      this.suppressClick = moved;
 
-      // La carte déplacée est épinglée : le prochain calcul automatique la laissera où elle est.
-      if (treeId !== null) {
-        const id = Number(key.slice(1));
-        const target = key.startsWith('i') ? { individual: id } : { family: id };
-        this.api
-          .saveLayout(treeId, [{ ...target, x: position.x, y: position.y, pinned: true }])
-          .subscribe({ error: (err) => this.error.set(describeError(err)) });
+      if (moved) {
+        const treeId = this.store.currentId();
+        const position = this.positionOf(key);
+
+        // La carte déplacée est épinglée : le prochain calcul automatique la laissera là.
+        if (treeId !== null) {
+          const id = Number(key.slice(1));
+          const target = key.startsWith('i') ? { individual: id } : { family: id };
+          this.api
+            .saveLayout(treeId, [{ ...target, x: position.x, y: position.y, pinned: true }])
+            .subscribe({ error: (err) => this.error.set(describeError(err)) });
+        }
       }
     }
     this.panning = null;
@@ -266,8 +292,11 @@ export class TreeComponent {
 
   // ── Sélection ─────────────────────────────────────────────────────────────
   select(card: PersonCard): void {
-    // Un glissement se termine par un clic : ne pas ouvrir la fiche dans ce cas.
-    if (this.moved().has(`i${card.id}`) && this.drag) return;
+    // Le « click » qui clôt un glissement ne doit pas ouvrir la fiche.
+    if (this.suppressClick) {
+      this.suppressClick = false;
+      return;
+    }
 
     this.selected.set(card);
     this.timeline.set(null);
@@ -285,6 +314,35 @@ export class TreeComponent {
   closeCard(): void {
     this.selected.set(null);
     this.timeline.set(null);
+    this.editing.set(false);
+  }
+
+  /**
+   * Après une modification, le graphe entier est rechargé : une date de décès
+   * ajoutée change le style de la carte (règle « décédé »), un nom change le
+   * texte, une naissance change la génération. Recharger la seule fiche laisserait
+   * l'arbre en désaccord avec elle.
+   */
+  onEdited(): void {
+    const treeId = this.store.currentId();
+    const id = this.selected()?.id;
+    this.editing.set(false);
+    if (treeId === null) return;
+
+    this.api.getGraph(treeId).subscribe({
+      next: (graph) => {
+        this.graph.set(graph);
+        const refreshed = graph.nodes.find((n) => n.id === id) ?? null;
+        this.selected.set(refreshed);
+        if (refreshed) {
+          this.api.getTimeline(refreshed.id).subscribe({
+            next: (timeline) => this.timeline.set(timeline),
+            error: () => this.timeline.set(null),
+          });
+        }
+      },
+      error: (err) => this.error.set(describeError(err)),
+    });
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────

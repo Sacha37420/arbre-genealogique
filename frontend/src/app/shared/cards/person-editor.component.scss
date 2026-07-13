@@ -1,0 +1,283 @@
+:host {
+  display: block;
+}
+
+.editor {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 18px 48px rgba(20, 30, 45, 0.16);
+  padding: 20px 22px 16px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    color: #1f2733;
+  }
+}
+
+.close {
+  border: none;
+  background: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #a2abb6;
+  cursor: pointer;
+
+  &:hover {
+    color: #42505f;
+  }
+}
+
+section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #eef1f4;
+
+  &:first-of-type {
+    border-top: none;
+  }
+}
+
+h3 {
+  margin: 0 0 10px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #98a2ae;
+  font-weight: 600;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+
+  h3 {
+    margin: 0;
+  }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  > span {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #a2abb6;
+  }
+
+  &.full {
+    margin-top: 10px;
+  }
+
+  &.check {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 0.82rem;
+    color: #42505f;
+    cursor: pointer;
+  }
+}
+
+.input {
+  border: 1px solid #dde2e8;
+  border-radius: 7px;
+  padding: 6px 9px;
+  font-size: 0.84rem;
+  color: #2c3742;
+  background: #fff;
+  outline: none;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+
+  &:focus {
+    border-color: #1976d2;
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.12);
+  }
+}
+
+.full-width {
+  margin-top: 6px;
+}
+
+// ── Événements ───────────────────────────────────────────────────────────────
+.event {
+  border: 1px solid #eef1f4;
+  border-left: 3px solid #dde2e8;
+  border-radius: 9px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: #fbfcfd;
+
+  // Une période se distingue d'un événement ponctuel : elle occupe une durée.
+  &.period {
+    border-left-color: #00796b;
+  }
+}
+
+.event-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.type {
+  flex: 0 0 32%;
+  min-width: 110px;
+}
+
+.field.date {
+  flex: 1;
+  min-width: 110px;
+  gap: 2px;
+}
+
+.place {
+  flex: 1;
+  min-width: 90px;
+}
+
+.hint {
+  font-size: 0.68rem;
+  color: #8b95a1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tag-period {
+  background: #e0f2f0;
+  color: #00695c;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.icon {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 30px;
+  border: 1px solid #e0e5eb;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #6b7684;
+  line-height: 1;
+
+  &:hover {
+    background: #f2f5f9;
+  }
+
+  &.danger:hover {
+    background: #fdecea;
+    color: #a52717;
+    border-color: #f5c6c0;
+  }
+}
+
+.details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #e6eaef;
+
+  .full {
+    grid-column: 1 / -1;
+    margin-top: 0;
+  }
+}
+
+// ── Divers ───────────────────────────────────────────────────────────────────
+.muted {
+  color: #8b95a1;
+  font-size: 0.82rem;
+  margin: 6px 0;
+
+  &.small {
+    font-size: 0.74rem;
+    line-height: 1.55;
+  }
+}
+
+.syntax {
+  margin-top: 10px;
+
+  code {
+    background: #eef1f4;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.72rem;
+    color: #42505f;
+  }
+}
+
+.banner.error {
+  background: #fdecea;
+  color: #a52717;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  margin: 10px 0 0;
+}
+
+footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #eef1f4;
+}
+
+.btn {
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 0.83rem;
+  cursor: pointer;
+  border: 1px solid #dde2e8;
+  background: #fff;
+  color: #42505f;
+
+  &:hover:not(:disabled) {
+    background: #f4f7fa;
+    border-color: #c6cfd8;
+  }
+
+  &.primary {
+    background: #1976d2;
+    border-color: #1976d2;
+    color: #fff;
+
+    &:hover:not(:disabled) {
+      background: #1565c0;
+    }
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

@@ -108,15 +108,8 @@ class MeView(APIView):
 # Cloisonnement par propriétaire
 # ─────────────────────────────────────────────────────────────────────────────
 
-class OwnedTreeMixin:
-    """
-    Restreint le queryset aux objets des arbres visibles par l'utilisateur.
-
-    `tree_path` est le chemin ORM qui mène de l'objet à son arbre — c'est ce qui
-    permet d'appliquer la même règle de propriété à toutes les ressources filles.
-    """
-
-    tree_path = 'tree'
+class TreeOwnerMixin:
+    """Propriété d'un arbre — partagé par TreeViewSet et toutes les ressources filles."""
 
     def visible_trees(self):
         return Tree.objects.filter(
@@ -125,6 +118,21 @@ class OwnedTreeMixin:
 
     def owned_trees(self):
         return Tree.objects.filter(owner_email=self.request.user.email)
+
+    def check_tree(self, tree: Tree) -> None:
+        if tree.owner_email != self.request.user.email:
+            raise PermissionDenied("Cet arbre ne vous appartient pas.")
+
+
+class OwnedTreeMixin(TreeOwnerMixin):
+    """
+    Restreint le queryset aux objets des arbres visibles par l'utilisateur.
+
+    `tree_path` est le chemin ORM qui mène de l'objet à son arbre — c'est ce qui
+    permet d'appliquer la même règle de propriété à toutes les ressources filles.
+    """
+
+    tree_path = 'tree'
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -136,10 +144,6 @@ class OwnedTreeMixin:
         if tree_id:
             qs = qs.filter(**{self.tree_path: tree_id})
         return qs
-
-    def check_tree(self, tree: Tree) -> None:
-        if tree.owner_email != self.request.user.email:
-            raise PermissionDenied("Cet arbre ne vous appartient pas.")
 
     def _tree_of(self, validated: dict) -> Tree | None:
         """
@@ -169,18 +173,15 @@ class OwnedTreeMixin:
         serializer.save()
 
 
-class TreeViewSet(viewsets.ModelViewSet):
+class TreeViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
     """CRUD des arbres, plus le graphe, la frise, l'import et l'export GEDCOM."""
 
     serializer_class = TreeSerializer
     queryset = Tree.objects.all()
 
     def get_queryset(self):
-        if self.request.method in ('GET', 'HEAD'):
-            return Tree.objects.filter(
-                Q(owner_email=self.request.user.email) | Q(is_public=True)
-            )
-        return Tree.objects.filter(owner_email=self.request.user.email)
+        # Un arbre public est lisible par tous, modifiable par son seul propriétaire.
+        return self.visible_trees() if self.request.method in ('GET', 'HEAD') else self.owned_trees()
 
     def perform_create(self, serializer):
         tree = serializer.save(
@@ -441,9 +442,54 @@ class FamilyChildViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
     tree_path = 'family__tree'
 
 
+#: Un de ces événements chez une personne signifie qu'elle est décédée.
+DEATH_TAGS = [EventTag.DEAT, EventTag.BURI, EventTag.CREM]
+
+
+def refresh_is_living(individual: Individual | None) -> None:
+    """
+    Aligne `is_living` sur les faits : ajouter un décès grise la carte, le retirer
+    la ramène parmi les vivants. Sans cela, la date de décès resterait masquée sur
+    les cartes (les gabarits la cachent tant que la personne est « vivante »).
+    """
+    if individual is None:
+        return
+    is_living = not individual.events.filter(tag__in=DEATH_TAGS).exists()
+    if is_living != individual.is_living:
+        individual.is_living = is_living
+        individual.save(update_fields=['is_living'])
+
+
 class EventViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
     queryset = Event.objects.select_related('place')
     serializer_class = EventSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # L'éditeur d'une fiche ne veut que les événements de cette personne
+        # (ou de ses familles, pour le mariage et le divorce).
+        if individual := self.request.query_params.get('individual'):
+            qs = qs.filter(individual=individual)
+        if family := self.request.query_params.get('family'):
+            qs = qs.filter(family=family)
+        return qs
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        refresh_is_living(serializer.instance.individual)
+
+    def perform_update(self, serializer):
+        previous = serializer.instance.individual
+        super().perform_update(serializer)
+        # Le tag a pu changer (un décès requalifié en inhumation, ou l'inverse),
+        # et l'événement a pu être rattaché à quelqu'un d'autre.
+        refresh_is_living(previous)
+        refresh_is_living(serializer.instance.individual)
+
+    def perform_destroy(self, instance):
+        individual = instance.individual
+        super().perform_destroy(instance)
+        refresh_is_living(individual)
 
     @extend_schema(
         summary='Catalogue des types d’événements',

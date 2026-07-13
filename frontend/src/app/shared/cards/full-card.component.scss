@@ -124,4 +124,15 @@ footer {
     background: #f4f7fa;
     border-color: #c6cfd8;
   }
+
+  &.primary {
+    background: #1976d2;
+    border-color: #1976d2;
+    color: #fff;
+
+    &:hover {
+      background: #1565c0;
+      border-color: #1565c0;
+    }
+  }
 }

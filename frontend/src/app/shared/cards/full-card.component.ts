@@ -70,6 +70,7 @@ import { TimelineComponent } from './timeline.component';
       }
 
       <footer>
+        <button type="button" class="btn primary" (click)="edit.emit(card())">Modifier</button>
         <button type="button" class="btn ghost" (click)="addPhoto.emit(card())">
           {{ card().has_photo ? 'Changer la photo' : 'Ajouter une photo' }}
         </button>
@@ -91,6 +92,7 @@ export class FullCardComponent {
   readonly openRelated = output<number>();
   readonly addPhoto = output<PersonCard>();
   readonly enrich = output<PersonCard>();
+  readonly edit = output<PersonCard>();
 
   readonly fields = computed(() => resolveFields(this.card(), this.template()));
   readonly initials = computed(() => initials(this.card()));

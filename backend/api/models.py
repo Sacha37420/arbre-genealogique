@@ -521,6 +521,11 @@ class Event(models.Model):
     def is_attribute(self) -> bool:
         return self.tag in ATTRIBUTE_TAGS
 
+    @property
+    def place_name(self) -> str:
+        """Le lieu se saisit et se lit par son nom ; l'interface n'a pas à manier des id."""
+        return self.place.name if self.place else ''
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sources, dépôts, citations (SOUR / REPO)

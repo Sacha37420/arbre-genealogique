@@ -1,0 +1,267 @@
+<article class="editor">
+  <header>
+    <h2>Modifier la fiche</h2>
+    <button type="button" class="close" (click)="closed.emit()" aria-label="Fermer">×</button>
+  </header>
+
+  @if (loading()) {
+    <p class="muted">Chargement de la fiche…</p>
+  } @else if (detail(); as person) {
+    @if (error()) {
+      <p class="banner error">{{ error() }}</p>
+    }
+
+    <!-- ── Identité ──────────────────────────────────────────────────────── -->
+    <section>
+      <h3>Identité</h3>
+
+      <div class="grid">
+        <label>
+          <span>Prénom</span>
+          <input class="input" [ngModel]="givn()" (ngModelChange)="givn.set($event); touchIdentity()" />
+        </label>
+        <label>
+          <span>Nom</span>
+          <input class="input" [ngModel]="surn()" (ngModelChange)="surn.set($event); touchIdentity()" />
+        </label>
+        <label>
+          <span>Surnom</span>
+          <input class="input" [ngModel]="nick()" (ngModelChange)="nick.set($event); touchIdentity()" />
+        </label>
+        <label>
+          <span>Sexe</span>
+          <select class="input" [ngModel]="sex()" (ngModelChange)="sex.set($event); touchIdentity()">
+            @for (option of sexOptions; track option.value) {
+              <option [ngValue]="option.value">{{ option.label }}</option>
+            }
+          </select>
+        </label>
+      </div>
+
+      <label class="full">
+        <span>Note</span>
+        <textarea
+          class="input"
+          rows="2"
+          [ngModel]="note()"
+          (ngModelChange)="note.set($event); touchIdentity()"
+        ></textarea>
+      </label>
+
+      <label class="check">
+        <input
+          type="checkbox"
+          [ngModel]="confidential()"
+          (ngModelChange)="confidential.set($event); touchIdentity()"
+        />
+        Fiche confidentielle
+      </label>
+
+      <p class="muted small">
+        « Vivant / décédé » n’est pas un champ : il découle des faits. Ajoutez un
+        événement de décès, d’inhumation ou de crémation et la personne bascule
+        automatiquement.
+      </p>
+    </section>
+
+    <!-- ── Événements de la personne ─────────────────────────────────────── -->
+    <section>
+      <div class="section-head">
+        <h3>Événements et périodes</h3>
+        <button type="button" class="btn ghost" (click)="addEvent('INDIVIDUAL')">+ Ajouter</button>
+      </div>
+
+      @if (!personalEvents().length) {
+        <p class="muted">Aucun événement. Ajoutez une naissance, un décès, une profession…</p>
+      }
+
+      @for (event of personalEvents(); track event.id) {
+        <div class="event" [class.period]="event.is_period || looksLikePeriod(event)">
+          <div class="event-row">
+            <select
+              class="input type"
+              [ngModel]="event.tag"
+              (ngModelChange)="changeTag(event.id, $event)"
+            >
+              @for (type of typesFor(event); track type.tag) {
+                <option [value]="type.tag">{{ type.label }}</option>
+              }
+            </select>
+
+            <label class="field date">
+              <input
+                class="input"
+                placeholder="12 JAN 1875"
+                [ngModel]="event.date_raw"
+                (ngModelChange)="patchEvent(event.id, { date_raw: $event })"
+              />
+              @if (dateHint(event); as hint) {
+                <small class="hint">
+                  {{ hint }}
+                  @if (looksLikePeriod(event)) {
+                    <span class="tag-period">période</span>
+                  }
+                </small>
+              }
+            </label>
+
+            <input
+              class="input place"
+              placeholder="Lieu"
+              [ngModel]="event.place_name"
+              (ngModelChange)="patchEvent(event.id, { place_name: $event })"
+            />
+
+            <button
+              type="button"
+              class="icon"
+              (click)="toggleExpanded(event.id)"
+              [attr.aria-label]="event.expanded ? 'Replier' : 'Déplier'"
+            >
+              {{ event.expanded ? '▴' : '▾' }}
+            </button>
+            <button type="button" class="icon danger" (click)="removeEvent(event.id)" aria-label="Supprimer">
+              ×
+            </button>
+          </div>
+
+          @if (isAttribute(event)) {
+            <input
+              class="input full-width"
+              [placeholder]="'Valeur (ex. Charpentier)'"
+              [ngModel]="event.value"
+              (ngModelChange)="patchEvent(event.id, { value: $event })"
+            />
+          }
+
+          @if (isCustom(event)) {
+            <input
+              class="input full-width"
+              placeholder="Libellé de l’événement (ex. Décoration militaire)"
+              [ngModel]="event.custom_type"
+              (ngModelChange)="patchEvent(event.id, { custom_type: $event })"
+            />
+          }
+
+          @if (event.expanded) {
+            <div class="details">
+              <label>
+                <span>Catégorie (couleur sur la frise)</span>
+                <select
+                  class="input"
+                  [ngModel]="event.category"
+                  (ngModelChange)="patchEvent(event.id, { category: $event })"
+                >
+                  @for (category of categoryOptions; track category.key) {
+                    <option [value]="category.key">{{ category.label }}</option>
+                  }
+                </select>
+              </label>
+              <label>
+                <span>Âge</span>
+                <input
+                  class="input"
+                  placeholder="72y"
+                  [ngModel]="event.age"
+                  (ngModelChange)="patchEvent(event.id, { age: $event })"
+                />
+              </label>
+              <label>
+                <span>Cause</span>
+                <input
+                  class="input"
+                  [ngModel]="event.cause"
+                  (ngModelChange)="patchEvent(event.id, { cause: $event })"
+                />
+              </label>
+              <label>
+                <span>Organisme</span>
+                <input
+                  class="input"
+                  [ngModel]="event.agency"
+                  (ngModelChange)="patchEvent(event.id, { agency: $event })"
+                />
+              </label>
+              <label class="full">
+                <span>Note</span>
+                <textarea
+                  class="input"
+                  rows="2"
+                  [ngModel]="event.note"
+                  (ngModelChange)="patchEvent(event.id, { note: $event })"
+                ></textarea>
+              </label>
+            </div>
+          }
+        </div>
+      }
+
+      <p class="muted small syntax">
+        <strong>Dates</strong> — la syntaxe GEDCOM permet de rester fidèle à la source :
+        <code>12 JAN 1875</code> · <code>JAN 1875</code> · <code>1875</code> ·
+        <code>ABT 1875</code> (vers) · <code>BEF 1900</code> / <code>AFT 1900</code> ·
+        <code>BET 1830 AND 1835</code> · <code>FROM 1901 TO 1918</code> (période).
+      </p>
+    </section>
+
+    <!-- ── Événements familiaux ──────────────────────────────────────────── -->
+    @if (hasFamily()) {
+      <section>
+        <div class="section-head">
+          <h3>Événements de famille</h3>
+          <button type="button" class="btn ghost" (click)="addEvent('FAMILY')">+ Ajouter</button>
+        </div>
+        <p class="muted small">
+          Mariage, divorce… Ils appartiennent au couple, pas à la personne, mais
+          apparaissent sur sa frise.
+        </p>
+
+        @for (event of familyEvents(); track event.id) {
+          <div class="event" [class.period]="event.is_period || looksLikePeriod(event)">
+            <div class="event-row">
+              <select
+                class="input type"
+                [ngModel]="event.tag"
+                (ngModelChange)="changeTag(event.id, $event)"
+              >
+                @for (type of typesFor(event); track type.tag) {
+                  <option [value]="type.tag">{{ type.label }}</option>
+                }
+              </select>
+
+              <label class="field date">
+                <input
+                  class="input"
+                  placeholder="3 JUN 1900"
+                  [ngModel]="event.date_raw"
+                  (ngModelChange)="patchEvent(event.id, { date_raw: $event })"
+                />
+                @if (dateHint(event); as hint) {
+                  <small class="hint">{{ hint }}</small>
+                }
+              </label>
+
+              <input
+                class="input place"
+                placeholder="Lieu"
+                [ngModel]="event.place_name"
+                (ngModelChange)="patchEvent(event.id, { place_name: $event })"
+              />
+
+              <button type="button" class="icon danger" (click)="removeEvent(event.id)" aria-label="Supprimer">
+                ×
+              </button>
+            </div>
+          </div>
+        }
+      </section>
+    }
+
+    <footer>
+      <button type="button" class="btn" (click)="closed.emit()">Annuler</button>
+      <button type="button" class="btn primary" (click)="save()" [disabled]="saving() || !dirty()">
+        {{ saving() ? 'Enregistrement…' : 'Enregistrer' }}
+      </button>
+    </footer>
+  }
+</article>

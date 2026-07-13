@@ -273,6 +273,74 @@ export interface EventType {
   is_attribute: boolean;
 }
 
+/** Un événement tel que l'API le stocke — c'est l'objet que l'éditeur manipule. */
+export interface EventRecord {
+  id: number;
+  tree: number;
+  individual: number | null;
+  family: number | null;
+  tag: string;
+  custom_type: string;
+  value: string;
+  /** Seule date saisie : le serveur en déduit date_start/date_end/is_period. */
+  date_raw: string;
+  date_modifier: string;
+  date_start: string | null;
+  date_end: string | null;
+  date_phrase: string;
+  place: number | null;
+  /** Le lieu se saisit par son nom ; il est créé côté serveur s'il n'existe pas. */
+  place_name: string;
+  address: string;
+  age: string;
+  agency: string;
+  cause: string;
+  religion: string;
+  note: string;
+  category: string;
+  is_period: boolean;
+  color: string;
+  icon: string;
+  sort_order: number;
+  label: string;
+  is_attribute: boolean;
+}
+
+export interface PersonalName {
+  id: number;
+  type: string;
+  npfx: string;
+  givn: string;
+  nick: string;
+  spfx: string;
+  surn: string;
+  nsfx: string;
+  is_primary: boolean;
+}
+
+/** Fiche complète d'un individu (GET /api/individuals/<id>/). */
+export interface IndividualDetail {
+  id: number;
+  tree: number;
+  xref_id: string;
+  sex: Sex;
+  is_living: boolean;
+  confidential: boolean;
+  note: string;
+  custom: Record<string, unknown>;
+  names: PersonalName[];
+  events: EventRecord[];
+  given_name: string;
+  surname: string;
+  nickname: string;
+  full_name: string;
+  birth_date: string;
+  death_date: string;
+  photo_url: string | null;
+  /** Familles où la personne est conjoint : leurs mariages/divorces sont éditables ici. */
+  spouse_families: number[];
+}
+
 export const CATEGORY_COLORS: Record<string, string> = {
   LIFE: '#1976d2',
   FAMILY: '#c2185b',

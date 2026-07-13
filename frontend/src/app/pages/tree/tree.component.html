@@ -143,15 +143,24 @@
 
   @if (selected(); as card) {
     <aside class="drawer">
-      <app-full-card
-        [card]="card"
-        [template]="graph()?.full_template ?? null"
-        [timeline]="timeline()"
-        (closed)="closeCard()"
-        (openRelated)="openRelated($event)"
-        (enrich)="goEnrich($event)"
-        (addPhoto)="photoInput.click()"
-      />
+      @if (editing()) {
+        <app-person-editor
+          [individualId]="card.id"
+          (closed)="editing.set(false)"
+          (saved)="onEdited()"
+        />
+      } @else {
+        <app-full-card
+          [card]="card"
+          [template]="graph()?.full_template ?? null"
+          [timeline]="timeline()"
+          (closed)="closeCard()"
+          (openRelated)="openRelated($event)"
+          (enrich)="goEnrich($event)"
+          (edit)="editing.set(true)"
+          (addPhoto)="photoInput.click()"
+        />
+      }
       <input #photoInput type="file" accept="image/*" hidden (change)="uploadPhoto(card, $event)" />
     </aside>
   }

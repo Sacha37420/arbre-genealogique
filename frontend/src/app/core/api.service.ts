@@ -5,7 +5,9 @@ import { Observable, map } from 'rxjs';
 import { KeycloakService } from './keycloak.service';
 import {
   CardTemplate,
+  EventRecord,
   EventType,
+  IndividualDetail,
   Provider,
   ProviderResult,
   SearchPayload,
@@ -97,6 +99,15 @@ export class ApiService {
     return this.http.get<Timeline>(`${this.base}/api/individuals/${individualId}/timeline/`);
   }
 
+  getIndividual(id: number): Observable<IndividualDetail> {
+    return this.http.get<IndividualDetail>(`${this.base}/api/individuals/${id}/`);
+  }
+
+  /** Événements d'une famille (mariage, divorce…) : ils figurent sur la frise de ses conjoints. */
+  getFamilyEvents(familyId: number): Observable<EventRecord[]> {
+    return this.list<EventRecord>(`${this.base}/api/events/?family=${familyId}`);
+  }
+
   createIndividual(payload: {
     tree: number;
     givn?: string;
@@ -132,12 +143,12 @@ export class ApiService {
     return this.http.get<EventType[]>(`${this.base}/api/events/types/`);
   }
 
-  createEvent(payload: Record<string, unknown>): Observable<unknown> {
-    return this.http.post(`${this.base}/api/events/`, payload);
+  createEvent(payload: Record<string, unknown>): Observable<EventRecord> {
+    return this.http.post<EventRecord>(`${this.base}/api/events/`, payload);
   }
 
-  updateEvent(id: number, payload: Record<string, unknown>): Observable<unknown> {
-    return this.http.patch(`${this.base}/api/events/${id}/`, payload);
+  updateEvent(id: number, payload: Record<string, unknown>): Observable<EventRecord> {
+    return this.http.patch<EventRecord>(`${this.base}/api/events/${id}/`, payload);
   }
 
   deleteEvent(id: number): Observable<unknown> {
