@@ -1,0 +1,232 @@
+:host {
+  display: block;
+}
+
+.frise {
+  position: relative;
+  padding: 22px 8px 8px;
+}
+
+.axis {
+  position: relative;
+  height: 1px;
+  background: #e3e7ec;
+  margin-bottom: 10px;
+}
+
+.tick {
+  position: absolute;
+  top: -18px;
+  transform: translateX(-50%);
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 16px;
+    width: 1px;
+    height: 5px;
+    background: #cfd6de;
+  }
+}
+
+.tick-label {
+  font-size: 0.7rem;
+  color: #8b95a1;
+  font-variant-numeric: tabular-nums;
+}
+
+.lanes {
+  position: relative;
+}
+
+.period {
+  position: absolute;
+  height: 20px;
+  min-width: 8px;
+  border: none;
+  border-radius: 10px;
+  padding: 0 8px;
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  opacity: 0.88;
+  transition:
+    opacity 0.15s ease,
+    box-shadow 0.15s ease;
+
+  &:hover {
+    opacity: 1;
+  }
+
+  &.active {
+    opacity: 1;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor;
+  }
+}
+
+.events {
+  position: relative;
+  height: 58px;
+  margin-top: 6px;
+}
+
+.event {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  border-top: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+
+  &:hover .event-label,
+  &.active .event-label {
+    opacity: 1;
+    font-weight: 600;
+  }
+
+  &.active .dot {
+    transform: scale(1.4);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9);
+  }
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+  transition: transform 0.15s ease;
+}
+
+.event-label {
+  font-size: 0.66rem;
+  color: #5c6773;
+  opacity: 0.75;
+  white-space: nowrap;
+  // Les libellés se croiseraient sur une vie dense : on les incline.
+  writing-mode: vertical-rl;
+  max-height: 42px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty {
+  color: #8b95a1;
+  font-size: 0.85rem;
+  font-style: italic;
+  margin: 12px 0;
+}
+
+.undated {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e3e7ec;
+}
+
+.undated-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #98a2ae;
+}
+
+.chip {
+  border: 1px solid;
+  border-radius: 999px;
+  background: #fff;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  color: #42505f;
+
+  &.active {
+    background: #f2f5f9;
+    font-weight: 600;
+  }
+}
+
+.detail {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e6eaef;
+  border-radius: 10px;
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.badge {
+  color: #fff;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.close {
+  margin-left: auto;
+  border: none;
+  background: none;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #98a2ae;
+
+  &:hover {
+    color: #42505f;
+  }
+}
+
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 14px;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+dt {
+  color: #8b95a1;
+}
+
+dd {
+  margin: 0;
+  color: #2c3742;
+}
+
+.link {
+  margin-top: 10px;
+  border: none;
+  background: none;
+  padding: 0;
+  color: #1976d2;
+  font-size: 0.82rem;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}

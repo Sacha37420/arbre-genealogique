@@ -1,0 +1,382 @@
+import { Component, computed, effect, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
+
+import { ApiService } from '../../core/api.service';
+import { JUNCTION_SIZE, Positioned, computeLayout, edgePath } from '../../core/layout';
+import { Edge, EdgeStyleSpec, FamilyNode, PersonCard, Timeline, TreeGraph } from '../../core/models';
+import { TreeStore, describeError } from '../../core/tree-store';
+import { FullCardComponent } from '../../shared/cards/full-card.component';
+import { MiniCardComponent } from '../../shared/cards/mini-card.component';
+
+interface RenderedEdge {
+  id: string;
+  path: string;
+  style: EdgeStyleSpec;
+}
+
+const DEFAULT_EDGE: EdgeStyleSpec = {
+  color: '#b6c0cd',
+  width: 2,
+  dash: 'solid',
+  curve: 'orthogonal',
+  marker_end: '',
+  opacity: 1,
+};
+
+@Component({
+  selector: 'app-tree',
+  standalone: true,
+  imports: [FormsModule, MiniCardComponent, FullCardComponent],
+  templateUrl: './tree.component.html',
+  styleUrl: './tree.component.scss',
+})
+export class TreeComponent {
+  private api = inject(ApiService);
+  private router = inject(Router);
+  readonly store = inject(TreeStore);
+
+  readonly graph = signal<TreeGraph | null>(null);
+  readonly loading = signal(false);
+  readonly error = signal('');
+
+  readonly selected = signal<PersonCard | null>(null);
+  readonly timeline = signal<Timeline | null>(null);
+
+  readonly zoom = signal(1);
+  readonly pan = signal<Positioned>({ x: 0, y: 0 });
+
+  /** Positions en cours de glissement, superposées à celles calculées. */
+  private readonly moved = signal(new Map<string, Positioned>());
+
+  private drag: { key: string; startX: number; startY: number; originX: number; originY: number } | null = null;
+  private panning: { startX: number; startY: number; originX: number; originY: number } | null = null;
+
+  readonly newPersonName = signal('');
+  readonly busy = signal('');
+
+  constructor() {
+    this.store.load();
+
+    // Recharger le graphe dès que l'arbre courant change.
+    effect(() => {
+      const treeId = this.store.currentId();
+      if (treeId === null) {
+        this.graph.set(null);
+        return;
+      }
+      this.reload(treeId);
+    });
+  }
+
+  // ── Chargement ────────────────────────────────────────────────────────────
+  reload(treeId = this.store.currentId()): void {
+    if (treeId === null) return;
+    this.loading.set(true);
+    this.error.set('');
+
+    this.api.getGraph(treeId).subscribe({
+      next: (graph) => {
+        this.graph.set(graph);
+        this.moved.set(new Map());
+        this.zoom.set(graph.settings.zoom || 1);
+        this.loading.set(false);
+      },
+      error: (err) => {
+        this.error.set(describeError(err));
+        this.loading.set(false);
+      },
+    });
+  }
+
+  // ── Mise en page ──────────────────────────────────────────────────────────
+  private readonly layout = computed(() => {
+    const graph = this.graph();
+    if (!graph) return null;
+    return computeLayout(graph.nodes, graph.families, graph.edges, graph.settings);
+  });
+
+  readonly canvasSize = computed(() => {
+    const layout = this.layout();
+    return { width: (layout?.width ?? 800) + 200, height: (layout?.height ?? 600) + 200 };
+  });
+
+  positionOf(key: string): Positioned {
+    const override = this.moved().get(key);
+    if (override) return override;
+
+    const layout = this.layout();
+    if (!layout) return { x: 0, y: 0 };
+
+    const id = Number(key.slice(1));
+    const found = key.startsWith('i') ? layout.individuals.get(id) : layout.families.get(id);
+    return found ?? { x: 0, y: 0 };
+  }
+
+  /** Coin haut-gauche de la carte : dagre renvoie un centre, le DOM veut un coin. */
+  cardOrigin(node: PersonCard): Positioned {
+    const center = this.positionOf(`i${node.id}`);
+    return {
+      x: center.x - (node.style?.width ?? 220) / 2,
+      y: center.y - (node.style?.height ?? 86) / 2,
+    };
+  }
+
+  junctionOrigin(family: FamilyNode): Positioned {
+    const center = this.positionOf(`f${family.id}`);
+    return { x: center.x - JUNCTION_SIZE / 2, y: center.y - JUNCTION_SIZE / 2 };
+  }
+
+  readonly edges = computed<RenderedEdge[]>(() => {
+    const graph = this.graph();
+    if (!graph) return [];
+    // Dépendance explicite : un glissement doit redessiner les liens.
+    this.moved();
+
+    const orientation = graph.settings.orientation || 'TB';
+
+    return graph.edges.map((edge: Edge) => {
+      const style = graph.edge_styles[edge.kind] ?? DEFAULT_EDGE;
+      const from = this.positionOf(edge.source);
+      const to = this.positionOf(edge.target);
+      return {
+        id: `${edge.source}->${edge.target}`,
+        path: edgePath(from, to, style.curve, orientation),
+        style,
+      };
+    });
+  });
+
+  dashArray(style: EdgeStyleSpec): string {
+    if (style.dash === 'dashed') return '7 5';
+    if (style.dash === 'dotted') return '2 4';
+    return '';
+  }
+
+  // ── Zoom & déplacement ────────────────────────────────────────────────────
+  onWheel(event: WheelEvent): void {
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const next = Math.min(Math.max(this.zoom() * factor, 0.2), 3);
+
+    // Zoom centré sur le curseur : sans cette correction, le contenu fuit sous la souris.
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+    const pan = this.pan();
+    const scale = next / this.zoom();
+
+    this.pan.set({
+      x: mouseX - (mouseX - pan.x) * scale,
+      y: mouseY - (mouseY - pan.y) * scale,
+    });
+    this.zoom.set(next);
+  }
+
+  onCanvasPointerDown(event: PointerEvent): void {
+    if (event.button !== 0) return;
+    const pan = this.pan();
+    this.panning = { startX: event.clientX, startY: event.clientY, originX: pan.x, originY: pan.y };
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  onNodePointerDown(event: PointerEvent, key: string): void {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+
+    const origin = this.positionOf(key);
+    this.drag = {
+      key,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: origin.x,
+      originY: origin.y,
+    };
+    (event.target as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  onPointerMove(event: PointerEvent): void {
+    const scale = this.zoom();
+
+    if (this.drag) {
+      const dx = (event.clientX - this.drag.startX) / scale;
+      const dy = (event.clientY - this.drag.startY) / scale;
+      const next = new Map(this.moved());
+      next.set(this.drag.key, { x: this.drag.originX + dx, y: this.drag.originY + dy });
+      this.moved.set(next);
+      return;
+    }
+
+    if (this.panning) {
+      this.pan.set({
+        x: this.panning.originX + (event.clientX - this.panning.startX),
+        y: this.panning.originY + (event.clientY - this.panning.startY),
+      });
+    }
+  }
+
+  onPointerUp(): void {
+    if (this.drag) {
+      const { key } = this.drag;
+      const position = this.positionOf(key);
+      const treeId = this.store.currentId();
+      this.drag = null;
+
+      // La carte déplacée est épinglée : le prochain calcul automatique la laissera où elle est.
+      if (treeId !== null) {
+        const id = Number(key.slice(1));
+        const target = key.startsWith('i') ? { individual: id } : { family: id };
+        this.api
+          .saveLayout(treeId, [{ ...target, x: position.x, y: position.y, pinned: true }])
+          .subscribe({ error: (err) => this.error.set(describeError(err)) });
+      }
+    }
+    this.panning = null;
+  }
+
+  /** Rend la main au moteur de placement : toutes les cartes sont désépinglées. */
+  autoLayout(): void {
+    const graph = this.graph();
+    const treeId = this.store.currentId();
+    if (!graph || treeId === null) return;
+
+    const positions = [
+      ...graph.nodes.map((n) => ({ individual: n.id, x: 0, y: 0, pinned: false })),
+      ...graph.families.map((f) => ({ family: f.id, x: 0, y: 0, pinned: false })),
+    ];
+    if (!positions.length) return;
+
+    this.busy.set('Réorganisation…');
+    this.api.saveLayout(treeId, positions).subscribe({
+      next: () => {
+        this.busy.set('');
+        this.reload(treeId);
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  resetView(): void {
+    this.zoom.set(1);
+    this.pan.set({ x: 0, y: 0 });
+  }
+
+  // ── Sélection ─────────────────────────────────────────────────────────────
+  select(card: PersonCard): void {
+    // Un glissement se termine par un clic : ne pas ouvrir la fiche dans ce cas.
+    if (this.moved().has(`i${card.id}`) && this.drag) return;
+
+    this.selected.set(card);
+    this.timeline.set(null);
+    this.api.getTimeline(card.id).subscribe({
+      next: (timeline) => this.timeline.set(timeline),
+      error: (err) => this.error.set(describeError(err)),
+    });
+  }
+
+  openRelated(individualId: number): void {
+    const card = this.graph()?.nodes.find((n) => n.id === individualId);
+    if (card) this.select(card);
+  }
+
+  closeCard(): void {
+    this.selected.set(null);
+    this.timeline.set(null);
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+  addPerson(): void {
+    const treeId = this.store.currentId();
+    const name = this.newPersonName().trim();
+    if (treeId === null || !name) return;
+
+    const parts = name.split(/\s+/);
+    const surn = parts.length > 1 ? parts.pop()! : '';
+    const givn = parts.join(' ');
+
+    this.busy.set('Ajout…');
+    this.api.createIndividual({ tree: treeId, givn, surn }).subscribe({
+      next: () => {
+        this.newPersonName.set('');
+        this.busy.set('');
+        this.reload(treeId);
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  uploadPhoto(card: PersonCard, event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    const treeId = this.store.currentId();
+    if (!file || treeId === null) return;
+
+    this.busy.set('Envoi de la photo…');
+    this.api.uploadPhoto(treeId, card.id, file).subscribe({
+      next: () => {
+        this.busy.set('');
+        input.value = '';
+        this.reload(treeId);
+        this.closeCard();
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  importGedcom(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    const treeId = this.store.currentId();
+    if (!file || treeId === null) return;
+
+    this.busy.set('Import GEDCOM…');
+    this.api.importGedcom(treeId, file).subscribe({
+      next: () => {
+        this.busy.set('');
+        input.value = '';
+        this.reload(treeId);
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  exportGedcom(): void {
+    const tree = this.store.current();
+    if (!tree) return;
+
+    this.api.exportGedcom(tree.id).subscribe({
+      next: (blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${tree.name.replace(/\s+/g, '_')}.ged`;
+        link.click();
+        URL.revokeObjectURL(url);
+      },
+      error: (err) => this.error.set(describeError(err)),
+    });
+  }
+
+  createTree(): void {
+    const name = prompt('Nom du nouvel arbre :');
+    if (name?.trim()) this.store.create(name.trim());
+  }
+
+  goEnrich(card?: PersonCard): void {
+    this.router.navigate(['/recherche'], {
+      queryParams: card ? { individual: card.id, surname: card.surname, given: card.given_name } : {},
+    });
+  }
+}

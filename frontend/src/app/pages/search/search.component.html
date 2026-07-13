@@ -1,0 +1,311 @@
+<div class="page">
+  <header class="head">
+    <div>
+      <h1>Recherche &amp; enrichissement</h1>
+      <p class="subtitle">
+        Interrogez les bases généalogiques externes, puis versez une fiche dans votre arbre.
+        Les clés d’API restent dans votre navigateur et accompagnent chaque requête ;
+        le serveur ne les conserve pas.
+      </p>
+    </div>
+
+    <select
+      class="select"
+      [ngModel]="store.currentId()"
+      (ngModelChange)="store.select($event)"
+      aria-label="Arbre de destination"
+    >
+      @for (tree of store.trees(); track tree.id) {
+        <option [ngValue]="tree.id">{{ tree.name }}</option>
+      }
+      @if (!store.trees().length) {
+        <option [ngValue]="null">Aucun arbre</option>
+      }
+    </select>
+  </header>
+
+  <!-- ── Sources ─────────────────────────────────────────────────────────── -->
+  <section class="sources">
+    <div class="sources-head">
+      <h2>Sources</h2>
+      <button type="button" class="btn ghost" (click)="showKeys.set(!showKeys())">
+        {{ showKeys() ? 'Masquer les clés' : 'Clés d’API' }}
+      </button>
+    </div>
+
+    <div class="provider-grid">
+      @for (item of searchable(); track item.key) {
+        <button
+          type="button"
+          class="provider"
+          [class.active]="providerKey() === item.key"
+          (click)="providerKey.set(item.key)"
+        >
+          <span class="provider-name">{{ item.label }}</span>
+          <span class="badge" [class.free]="!item.requires_key">
+            {{ item.requires_key ? 'Clé requise' : 'Libre d’accès' }}
+          </span>
+          <span class="coverage">{{ item.coverage }}</span>
+        </button>
+      }
+    </div>
+
+    @if (provider(); as active) {
+      <p class="provider-help">
+        {{ active.credential_help }}
+        @if (active.docs_url) {
+          <a [href]="active.docs_url" target="_blank" rel="noopener">Documentation ↗</a>
+        }
+      </p>
+    }
+
+    @if (showKeys()) {
+      <div class="keys">
+        @for (item of providers(); track item.key) {
+          @if (item.requires_key || item.optional_credentials?.length) {
+            <div class="key-block">
+              <div class="key-head">
+                <strong>{{ item.label }}</strong>
+                <button type="button" class="link" (click)="forgetKeys(item.key)">Oublier</button>
+              </div>
+
+              @for (field of item.required_credentials.concat(item.optional_credentials ?? []); track field) {
+                <label class="row">
+                  <span>{{ field }}</span>
+                  <input
+                    type="password"
+                    class="input"
+                    autocomplete="off"
+                    [ngModel]="credentialValue(item.key, field)"
+                    (ngModelChange)="setCredential(item.key, field, $event)"
+                    [placeholder]="item.requires_key ? 'Collez la clé ici' : 'Facultatif'"
+                  />
+                </label>
+              }
+            </div>
+          }
+        }
+
+        <p class="hint">
+          Ces clés sont stockées dans le stockage local de ce navigateur uniquement.
+          Elles sont transmises au serveur à chaque requête, qui les relaie au fournisseur
+          sans les enregistrer.
+        </p>
+      </div>
+    }
+  </section>
+
+  <!-- ── Formulaire ──────────────────────────────────────────────────────── -->
+  <section class="form">
+    <div class="fields">
+      <label>
+        <span>Prénom</span>
+        <input class="input" [ngModel]="given()" (ngModelChange)="given.set($event)" (keyup.enter)="search()" />
+      </label>
+      <label>
+        <span>Nom</span>
+        <input class="input" [ngModel]="surname()" (ngModelChange)="surname.set($event)" (keyup.enter)="search()" />
+      </label>
+      <label class="narrow">
+        <span>Naissance</span>
+        <input
+          type="number"
+          class="input"
+          placeholder="1875"
+          [ngModel]="birthYear()"
+          (ngModelChange)="birthYear.set($event ? +$event : null)"
+        />
+      </label>
+      <label class="narrow">
+        <span>Décès</span>
+        <input
+          type="number"
+          class="input"
+          placeholder="1940"
+          [ngModel]="deathYear()"
+          (ngModelChange)="deathYear.set($event ? +$event : null)"
+        />
+      </label>
+      <label>
+        <span>Lieu</span>
+        <input class="input" placeholder="Lyon" [ngModel]="place()" (ngModelChange)="place.set($event)" />
+      </label>
+
+      <button type="button" class="btn primary" (click)="search()" [disabled]="searching() || missingKey()">
+        {{ searching() ? 'Recherche…' : 'Rechercher' }}
+      </button>
+    </div>
+
+    @if (missingKey()) {
+      <p class="warn">
+        Cette source demande une clé d’API. Ouvrez « Clés d’API » ci-dessus pour la renseigner.
+      </p>
+    }
+  </section>
+
+  <!-- ── Options d'import ────────────────────────────────────────────────── -->
+  <section class="import-options">
+    <label class="row">
+      <span>Importer vers</span>
+      <select class="select" [ngModel]="target()" (ngModelChange)="target.set($event)">
+        <option [ngValue]="null">Nouvelle personne dans l’arbre</option>
+        @for (person of people(); track person.id) {
+          <option [ngValue]="person.id">Compléter : {{ labelOf(person) }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="check">
+      <input type="checkbox" [ngModel]="withRelatives()" (ngModelChange)="withRelatives.set($event)" />
+      Créer aussi les proches annoncés (parents, conjoints, enfants)
+    </label>
+
+    <label class="check">
+      <input type="checkbox" [ngModel]="withPhoto()" (ngModelChange)="withPhoto.set($event)" />
+      Télécharger le portrait dans la base
+    </label>
+
+    <button type="button" class="btn ghost" (click)="geocodeAll()" [disabled]="store.currentId() === null">
+      Géocoder les lieux de l’arbre
+    </button>
+  </section>
+
+  @if (message()) {
+    <p class="banner info">{{ message() }}</p>
+  }
+  @if (error()) {
+    <p class="banner error">{{ error() }} <button type="button" (click)="error.set('')">×</button></p>
+  }
+
+  <!-- ── Résultats ───────────────────────────────────────────────────────── -->
+  @if (results().length) {
+    <section class="results">
+      <h2>{{ results().length }} résultat(s)</h2>
+
+      <ul>
+        @for (result of results(); track result.external_id) {
+          <li class="result">
+            <div class="avatar">
+              @if (result.photo_url) {
+                <img [src]="result.photo_url" [alt]="result.given_name + ' ' + result.surname" />
+              } @else {
+                <span aria-hidden="true">👤</span>
+              }
+            </div>
+
+            <div class="info">
+              <div class="name-line">
+                <strong>{{ result.given_name }} {{ result.surname }}</strong>
+                @if (result.score) {
+                  <span
+                    class="score"
+                    [class.high]="scorePercent(result) >= 70"
+                    [title]="'Correspondance estimée avec votre recherche'"
+                  >
+                    {{ scorePercent(result) }} %
+                  </span>
+                }
+              </div>
+
+              <div class="dates">
+                @if (result.birth_date) {
+                  <span>★ {{ result.birth_date }}</span>
+                }
+                @if (result.birth_place) {
+                  <span class="place">{{ result.birth_place }}</span>
+                }
+                @if (result.death_date) {
+                  <span>† {{ result.death_date }}</span>
+                }
+              </div>
+
+              @if (result.description) {
+                <p class="description">{{ result.description }}</p>
+              }
+            </div>
+
+            <div class="actions">
+              <button type="button" class="btn ghost" (click)="openDetail(result)">Détail</button>
+              <button
+                type="button"
+                class="btn primary"
+                (click)="importResult(result)"
+                [disabled]="importing() === result.external_id || store.currentId() === null"
+              >
+                {{ importing() === result.external_id ? 'Import…' : 'Importer' }}
+              </button>
+              @if (result.url) {
+                <a class="btn ghost" [href]="result.url" target="_blank" rel="noopener">Source ↗</a>
+              }
+            </div>
+          </li>
+        }
+      </ul>
+    </section>
+  }
+
+  <!-- ── Fiche détaillée ─────────────────────────────────────────────────── -->
+  @if (detail(); as person) {
+    <div class="overlay" (click)="closeDetail()">
+      <article class="detail" (click)="$event.stopPropagation()">
+        <header>
+          <h2>{{ person.given_name }} {{ person.surname }}</h2>
+          <button type="button" class="close" (click)="closeDetail()" aria-label="Fermer">×</button>
+        </header>
+
+        <dl>
+          @if (person.birth_date || person.birth_place) {
+            <dt>Naissance</dt>
+            <dd>{{ person.birth_date }} {{ person.birth_place ? '— ' + person.birth_place : '' }}</dd>
+          }
+          @if (person.death_date || person.death_place) {
+            <dt>Décès</dt>
+            <dd>{{ person.death_date }} {{ person.death_place ? '— ' + person.death_place : '' }}</dd>
+          }
+          @if (person.occupation) {
+            <dt>Profession</dt>
+            <dd>{{ person.occupation }}</dd>
+          }
+          @if (person.description) {
+            <dt>Description</dt>
+            <dd>{{ person.description }}</dd>
+          }
+          <dt>Identifiant</dt>
+          <dd><code>{{ person.external_id }}</code></dd>
+        </dl>
+
+        @if (person.relatives.length) {
+          <h3>Proches annoncés par la source ({{ person.relatives.length }})</h3>
+          <ul class="relatives">
+            @for (relative of person.relatives; track relative.external_id + relative.relation) {
+              <li>
+                <span class="relation">{{ relationLabel(relative.relation) }}</span>
+                <span class="relative-name">{{ relative.name || relative.external_id }}</span>
+                @if (relative.birth_date) {
+                  <span class="relative-date">{{ relative.birth_date }}</span>
+                }
+              </li>
+            }
+          </ul>
+          <p class="hint">
+            Cochez « Créer aussi les proches annoncés » avant d’importer pour les ajouter
+            à l’arbre et les relier automatiquement.
+          </p>
+        } @else {
+          <p class="hint">Cette source n’annonce aucun proche pour cette personne.</p>
+        }
+
+        <footer>
+          <button
+            type="button"
+            class="btn primary"
+            (click)="importResult(person); closeDetail()"
+            [disabled]="store.currentId() === null"
+          >
+            Importer dans l’arbre
+          </button>
+        </footer>
+      </article>
+    </div>
+  }
+</div>

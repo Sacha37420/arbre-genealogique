@@ -1,0 +1,329 @@
+<div class="page">
+  <header class="head">
+    <div>
+      <h1>Paramétrage des cartes</h1>
+      <p class="subtitle">
+        La mini-carte est le nœud affiché dans l’arbre ; la grande carte s’ouvre au clic.
+        Les modifications apparaissent immédiatement dans l’aperçu.
+      </p>
+    </div>
+
+    <select
+      class="select"
+      [ngModel]="store.currentId()"
+      (ngModelChange)="store.select($event)"
+      aria-label="Arbre"
+    >
+      @for (tree of store.trees(); track tree.id) {
+        <option [ngValue]="tree.id">{{ tree.name }}</option>
+      }
+    </select>
+  </header>
+
+  @if (store.currentId() === null) {
+    <p class="empty">Créez d’abord un arbre depuis la page principale.</p>
+  } @else if (loading()) {
+    <p class="empty">Chargement des gabarits…</p>
+  } @else {
+    <nav class="tabs">
+      <button type="button" [class.active]="tab() === 'MINI'" (click)="tab.set('MINI')">
+        Mini-carte
+      </button>
+      <button type="button" [class.active]="tab() === 'FULL'" (click)="tab.set('FULL')">
+        Grande carte
+      </button>
+    </nav>
+
+    @if (current(); as template) {
+      <div class="layout">
+        <!-- ── Éditeur ─────────────────────────────────────────────────── -->
+        <section class="editor">
+          <fieldset>
+            <legend>Photo</legend>
+
+            <label class="row">
+              <span>Position</span>
+              <select
+                class="select"
+                [ngModel]="template.photo_position"
+                (ngModelChange)="patchTemplate('photo_position', $event)"
+              >
+                @for (position of photoPositions; track position.value) {
+                  <option [ngValue]="position.value">{{ position.label }}</option>
+                }
+              </select>
+            </label>
+
+            @if (template.photo_position !== 'NONE') {
+              <label class="row">
+                <span>Taille ({{ template.photo_size }} px)</span>
+                <input
+                  type="range"
+                  min="32"
+                  max="240"
+                  step="4"
+                  [ngModel]="template.photo_size"
+                  (ngModelChange)="patchTemplate('photo_size', +$event)"
+                />
+              </label>
+
+              <label class="row">
+                <span>Forme</span>
+                <select
+                  class="select"
+                  [ngModel]="template.photo_shape"
+                  (ngModelChange)="patchTemplate('photo_shape', $event)"
+                >
+                  <option value="rounded">Arrondie</option>
+                  <option value="circle">Ronde</option>
+                  <option value="square">Carrée</option>
+                </select>
+              </label>
+
+              <label class="row">
+                <span>Sans photo</span>
+                <select
+                  class="select"
+                  [ngModel]="template.photo_placeholder"
+                  (ngModelChange)="patchTemplate('photo_placeholder', $event)"
+                >
+                  <option value="initials">Initiales</option>
+                  <option value="silhouette">Silhouette</option>
+                </select>
+              </label>
+            }
+          </fieldset>
+
+          <fieldset>
+            <legend>Informations affichées</legend>
+            <p class="hint">
+              L’ordre du tableau est celui de la carte. Un champ vide pour une personne
+              n’apparaît pas sur sa carte.
+            </p>
+
+            <ul class="fields">
+              @for (field of template.fields; track field.key; let i = $index) {
+                <li class="field" [class.off]="!field.show">
+                  <div class="field-main">
+                    <input
+                      type="checkbox"
+                      [ngModel]="field.show"
+                      (ngModelChange)="patchField(i, { show: $event })"
+                      [attr.aria-label]="'Afficher ' + field.label"
+                    />
+                    <input
+                      class="input label-input"
+                      [ngModel]="field.label"
+                      (ngModelChange)="patchField(i, { label: $event })"
+                    />
+                    <code class="key">{{ field.key }}</code>
+
+                    <div class="reorder">
+                      <button type="button" (click)="moveField(i, -1)" [disabled]="i === 0" aria-label="Monter">↑</button>
+                      <button
+                        type="button"
+                        (click)="moveField(i, 1)"
+                        [disabled]="i === template.fields.length - 1"
+                        aria-label="Descendre"
+                      >
+                        ↓
+                      </button>
+                      <button type="button" class="danger" (click)="removeField(i)" aria-label="Retirer">×</button>
+                    </div>
+                  </div>
+
+                  <div class="field-style">
+                    <label title="Gras">
+                      <input
+                        type="checkbox"
+                        [ngModel]="field.bold"
+                        (ngModelChange)="patchField(i, { bold: $event })"
+                      />
+                      <strong>G</strong>
+                    </label>
+
+                    <label title="Majuscules">
+                      <input
+                        type="checkbox"
+                        [ngModel]="field.uppercase"
+                        (ngModelChange)="patchField(i, { uppercase: $event })"
+                      />
+                      AA
+                    </label>
+
+                    <label title="Taille du texte">
+                      <input
+                        type="number"
+                        class="input tiny"
+                        min="8"
+                        max="32"
+                        [ngModel]="field.size"
+                        (ngModelChange)="patchField(i, { size: +$event })"
+                      />
+                      px
+                    </label>
+
+                    <label title="Couleur">
+                      <input
+                        type="color"
+                        [ngModel]="field.color"
+                        (ngModelChange)="patchField(i, { color: $event })"
+                      />
+                    </label>
+
+                    <label class="preface" title="Préfixe affiché avant la valeur (★, †…)">
+                      <input
+                        class="input tiny"
+                        [ngModel]="field.prefix ?? ''"
+                        (ngModelChange)="patchField(i, { prefix: $event })"
+                        placeholder="préfixe"
+                      />
+                    </label>
+
+                    @if (field.key === 'death_date' || field.key === 'death_place') {
+                      <label title="Ne pas afficher pour les personnes vivantes">
+                        <input
+                          type="checkbox"
+                          [ngModel]="field.hide_if_living"
+                          (ngModelChange)="patchField(i, { hide_if_living: $event })"
+                        />
+                        si décédé·e
+                      </label>
+                    }
+                  </div>
+                </li>
+              }
+            </ul>
+
+            @if (availableToAdd().length) {
+              <label class="row add">
+                <span>Ajouter un champ</span>
+                <select class="select" #adder (change)="addField(adder.value); adder.value = ''">
+                  <option value="">Choisir…</option>
+                  @for (option of availableToAdd(); track option.key) {
+                    <option [value]="option.key">{{ option.label }}</option>
+                  }
+                </select>
+              </label>
+            }
+          </fieldset>
+
+          <fieldset>
+            <legend>Présentation</legend>
+
+            <label class="row">
+              <span>Format des dates</span>
+              <select
+                class="select"
+                [ngModel]="template.date_format"
+                (ngModelChange)="patchTemplate('date_format', $event)"
+              >
+                <option value="dd/MM/yyyy">31/12/1875</option>
+                <option value="yyyy">1875 (année seule)</option>
+              </select>
+            </label>
+
+            <label class="row">
+              <span>Marque « décédé·e »</span>
+              <select
+                class="select"
+                [ngModel]="template.deceased_marker"
+                (ngModelChange)="patchTemplate('deceased_marker', $event)"
+              >
+                <option value="cross">Croix †</option>
+                <option value="none">Aucune</option>
+              </select>
+            </label>
+
+            @if (tab() === 'FULL') {
+              <label class="row">
+                <span>Fond de la carte</span>
+                <input
+                  type="color"
+                  [ngModel]="template.background_color"
+                  (ngModelChange)="patchTemplate('background_color', $event)"
+                />
+              </label>
+            }
+          </fieldset>
+
+          @if (tab() === 'FULL') {
+            <fieldset>
+              <legend>Frise chronologique</legend>
+
+              <label class="row switch">
+                <input
+                  type="checkbox"
+                  [ngModel]="template.show_timeline"
+                  (ngModelChange)="patchTemplate('show_timeline', $event)"
+                />
+                <span>Afficher la frise sous les informations</span>
+              </label>
+
+              @if (template.show_timeline) {
+                <label class="row switch">
+                  <input
+                    type="checkbox"
+                    [ngModel]="template.show_periods"
+                    (ngModelChange)="patchTemplate('show_periods', $event)"
+                  />
+                  <span>Afficher les périodes (métiers, résidences…) et pas seulement les événements</span>
+                </label>
+
+                <p class="hint">Catégories affichées sur la frise :</p>
+                <div class="categories">
+                  @for (category of categoryOptions; track category.key) {
+                    <label class="chip">
+                      <input
+                        type="checkbox"
+                        [checked]="isCategoryOn(category.key)"
+                        (change)="toggleCategory(category.key, $any($event.target).checked)"
+                      />
+                      {{ category.label }}
+                    </label>
+                  }
+                </div>
+              }
+            </fieldset>
+          }
+
+          <div class="actions">
+            <button type="button" class="btn primary" (click)="save()" [disabled]="saving()">
+              {{ saving() ? 'Enregistrement…' : 'Enregistrer' }}
+            </button>
+            @if (saved()) {
+              <span class="ok">Enregistré ✓</span>
+            }
+            @if (error()) {
+              <span class="ko">{{ error() }}</span>
+            }
+          </div>
+        </section>
+
+        <!-- ── Aperçu ──────────────────────────────────────────────────── -->
+        <section class="preview">
+          <h2>Aperçu</h2>
+          @if (!graph()?.nodes?.length) {
+            <p class="hint">
+              Aucun individu dans cet arbre : l’aperçu utilise une personne fictive.
+            </p>
+          }
+
+          <div class="preview-stage" [class.mini]="tab() === 'MINI'">
+            @if (tab() === 'MINI') {
+              <app-mini-card [card]="previewCard()" [template]="template" />
+            } @else {
+              <app-full-card
+                [card]="previewCard()"
+                [template]="template"
+                [timeline]="previewTimeline()"
+              />
+            }
+          </div>
+        </section>
+      </div>
+    } @else {
+      <p class="empty">Aucun gabarit trouvé pour cet arbre.</p>
+    }
+  }
+</div>

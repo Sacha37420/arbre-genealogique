@@ -1,0 +1,158 @@
+<div class="page">
+  <header class="toolbar">
+    <div class="group">
+      <label class="sr-only" for="tree-select">Arbre</label>
+      <select
+        id="tree-select"
+        class="select"
+        [ngModel]="store.currentId()"
+        (ngModelChange)="store.select($event)"
+      >
+        @for (tree of store.trees(); track tree.id) {
+          <option [ngValue]="tree.id">{{ tree.name }} ({{ tree.individual_count }})</option>
+        }
+        @if (!store.trees().length) {
+          <option [ngValue]="null">Aucun arbre</option>
+        }
+      </select>
+      <button type="button" class="btn ghost" (click)="createTree()">+ Arbre</button>
+    </div>
+
+    @if (store.currentId() !== null) {
+      <div class="group grow">
+        <input
+          class="input"
+          placeholder="Ajouter une personne (Prénom Nom)"
+          [ngModel]="newPersonName()"
+          (ngModelChange)="newPersonName.set($event)"
+          (keyup.enter)="addPerson()"
+        />
+        <button type="button" class="btn primary" (click)="addPerson()" [disabled]="!newPersonName().trim()">
+          Ajouter
+        </button>
+      </div>
+
+      <div class="group">
+        <button type="button" class="btn ghost" (click)="autoLayout()" title="Replacer automatiquement toutes les cartes">
+          Réorganiser
+        </button>
+        <button type="button" class="btn ghost" (click)="resetView()">Recentrer</button>
+
+        <label class="btn ghost file">
+          Importer GEDCOM
+          <input type="file" accept=".ged,.gedcom,text/plain" (change)="importGedcom($event)" hidden />
+        </label>
+        <button type="button" class="btn ghost" (click)="exportGedcom()">Exporter GEDCOM</button>
+        <button type="button" class="btn ghost" (click)="goEnrich()">Enrichir</button>
+      </div>
+    }
+  </header>
+
+  @if (busy()) {
+    <p class="banner info">{{ busy() }}</p>
+  }
+  @if (error()) {
+    <p class="banner error">{{ error() }} <button type="button" (click)="error.set('')">×</button></p>
+  }
+
+  @if (store.currentId() === null) {
+    <div class="empty">
+      <h2>Aucun arbre pour l’instant</h2>
+      <p>Créez un arbre, puis ajoutez des personnes ou importez un fichier GEDCOM existant.</p>
+      <button type="button" class="btn primary" (click)="createTree()">Créer mon premier arbre</button>
+    </div>
+  } @else if (loading()) {
+    <div class="empty"><p>Chargement de l’arbre…</p></div>
+  } @else if (graph(); as data) {
+    @if (!data.nodes.length) {
+      <div class="empty">
+        <h2>{{ data.tree.name }} est vide</h2>
+        <p>Ajoutez une première personne dans la barre du haut, importez un GEDCOM, ou allez chercher une lignée dans les sources externes.</p>
+        <button type="button" class="btn primary" (click)="goEnrich()">Rechercher dans les sources externes</button>
+      </div>
+    } @else {
+      <div
+        class="canvas"
+        [style.background]="data.settings.background_color"
+        (wheel)="onWheel($event)"
+        (pointerdown)="onCanvasPointerDown($event)"
+        (pointermove)="onPointerMove($event)"
+        (pointerup)="onPointerUp()"
+        (pointercancel)="onPointerUp()"
+      >
+        <div
+          class="viewport"
+          [style.transform]="'translate(' + pan().x + 'px,' + pan().y + 'px) scale(' + zoom() + ')'"
+        >
+          <svg
+            class="edges"
+            [attr.width]="canvasSize().width"
+            [attr.height]="canvasSize().height"
+            aria-hidden="true"
+          >
+            @for (edge of edges(); track edge.id) {
+              <path
+                [attr.d]="edge.path"
+                [attr.stroke]="edge.style.color"
+                [attr.stroke-width]="edge.style.width"
+                [attr.stroke-dasharray]="dashArray(edge.style)"
+                [attr.opacity]="edge.style.opacity"
+                fill="none"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            }
+          </svg>
+
+          @for (family of data.families; track family.id) {
+            <button
+              type="button"
+              class="junction"
+              [class.married]="family.union_type === 'MARRIED'"
+              [style.left.px]="junctionOrigin(family).x"
+              [style.top.px]="junctionOrigin(family).y"
+              (pointerdown)="onNodePointerDown($event, 'f' + family.id)"
+              [title]="family.marriage_date ? 'Mariage : ' + family.marriage_date : 'Union'"
+              aria-label="Union"
+            ></button>
+          }
+
+          @for (node of data.nodes; track node.id) {
+            @if (!node.hidden) {
+              <div
+                class="node"
+                [style.left.px]="cardOrigin(node).x"
+                [style.top.px]="cardOrigin(node).y"
+                (pointerdown)="onNodePointerDown($event, 'i' + node.id)"
+              >
+                <app-mini-card
+                  [card]="node"
+                  [template]="data.mini_template"
+                  [selected]="selected()?.id === node.id"
+                  (click)="select(node)"
+                />
+              </div>
+            }
+          }
+        </div>
+
+        <div class="zoom-badge">{{ (zoom() * 100).toFixed(0) }} %</div>
+      </div>
+    }
+  }
+
+  @if (selected(); as card) {
+    <aside class="drawer">
+      <app-full-card
+        [card]="card"
+        [template]="graph()?.full_template ?? null"
+        [timeline]="timeline()"
+        (closed)="closeCard()"
+        (openRelated)="openRelated($event)"
+        (enrich)="goEnrich($event)"
+        (addPhoto)="photoInput.click()"
+      />
+      <input #photoInput type="file" accept="image/*" hidden (change)="uploadPhoto(card, $event)" />
+    </aside>
+  }
+</div>

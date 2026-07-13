@@ -1,0 +1,45 @@
+version: "3.9"
+
+networks:
+  sso-net:
+    external: true
+    name: sso-lab_sso-net
+  dev-net:
+    external: true
+    name: dev-net
+
+services:
+
+  backend:
+    build: ./backend
+    container_name: arbre-genealogique-backend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8090:8000"
+    networks:
+      - sso-net
+      - dev-net
+    volumes:
+      - ./backend:/app
+    labels:
+      caddy: "${DOMAIN}"
+      caddy.handle_path: "/arbre-genealogique-api/*"
+      caddy.handle_path.reverse_proxy: "{{upstreams 8000}}"
+
+  frontend:
+    build: ./frontend
+    container_name: arbre-genealogique-frontend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "4208:80"
+    networks:
+      - sso-net
+    volumes:
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend/nginx-entrypoint.sh:/docker-entrypoint.d/40-env-config.sh:ro
+    labels:
+      caddy: "${DOMAIN}"
+      caddy.handle_path: "/arbre-genealogique/*"
+      caddy.handle_path.reverse_proxy: "{{upstreams 80}}"
