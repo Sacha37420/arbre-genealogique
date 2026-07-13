@@ -13,6 +13,15 @@ export interface Positioned {
 export interface LayoutResult {
   individuals: Map<number, Positioned>;
   families: Map<number, Positioned>;
+  /**
+   * Coordonnées des lignes où dagre a posé les cartes (leur y en orientation
+   * verticale, leur x en orientation horizontale).
+   *
+   * C'est sur elles que s'aimante un déplacement : on colle la carte à la ligne
+   * où se trouvent déjà les autres, plutôt qu'à une ligne théorique — ainsi
+   * l'aimantation aligne sur ce que l'utilisateur voit à l'écran.
+   */
+  rows: number[];
   width: number;
   height: number;
 }
@@ -91,9 +100,80 @@ export function computeLayout(
   return {
     individuals,
     families: familyPositions,
+    rows: collectRows(graph, visible, settings.orientation || 'TB'),
     width: meta.width ?? 1000,
     height: meta.height ?? 800,
   };
+}
+
+/** Est-on en orientation horizontale (les générations sont alors des colonnes) ? */
+export function isHorizontal(orientation: string): boolean {
+  return orientation === 'LR' || orientation === 'RL';
+}
+
+/**
+ * Lignes distinctes produites par dagre, dédupliquées.
+ *
+ * On lit les positions calculées et non les positions épinglées : une carte
+ * déplacée par l'utilisateur ne doit pas créer une nouvelle ligne d'aimantation,
+ * sinon un écart accidentel se figerait en référence.
+ */
+function collectRows(
+  graph: dagre.graphlib.Graph,
+  nodes: PersonCard[],
+  orientation: string,
+): number[] {
+  const axis = isHorizontal(orientation) ? 'x' : 'y';
+  const rows: number[] = [];
+
+  for (const node of nodes) {
+    const computed = graph.node(`i${node.id}`) as Positioned | undefined;
+    if (!computed) continue;
+
+    const value = computed[axis];
+    if (!rows.some((row) => Math.abs(row - value) < 1)) rows.push(value);
+  }
+
+  return rows.sort((a, b) => a - b);
+}
+
+export interface SnapOptions {
+  rows: number[];
+  orientation: string;
+  gridSize: number;
+  snapToGrid: boolean;
+}
+
+/**
+ * Aimante une position en cours de glissement.
+ *
+ * L'axe des générations est aimanté sur la ligne la plus proche : une carte ne
+ * peut donc plus dériver hors de sa rangée d'un coup de souris. L'autre axe suit
+ * la grille, si elle est active.
+ */
+export function snapPosition(position: Positioned, options: SnapOptions): Positioned {
+  const horizontal = isHorizontal(options.orientation);
+  const generationAxis = horizontal ? 'x' : 'y';
+  const freeAxis = horizontal ? 'y' : 'x';
+
+  const snapped: Positioned = { ...position };
+
+  const nearest = nearestRow(position[generationAxis], options.rows);
+  if (nearest !== null) snapped[generationAxis] = nearest;
+
+  if (options.snapToGrid && options.gridSize > 0) {
+    snapped[freeAxis] = Math.round(position[freeAxis] / options.gridSize) * options.gridSize;
+  }
+
+  return snapped;
+}
+
+/** Ligne la plus proche, ou null si l'arbre n'en a aucune. */
+export function nearestRow(value: number, rows: number[]): number | null {
+  if (!rows.length) return null;
+  return rows.reduce((best, row) =>
+    Math.abs(row - value) < Math.abs(best - value) ? row : best,
+  );
 }
 
 /**

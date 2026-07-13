@@ -38,6 +38,25 @@
         </button>
         <button type="button" class="btn ghost" (click)="resetView()">Recentrer</button>
 
+        <button
+          type="button"
+          class="btn ghost toggle"
+          [class.on]="graph()?.settings?.snap_to_grid"
+          (click)="toggleSetting('snap_to_grid')"
+          title="Aimanter les cartes sur la grille (la ligne de génération est toujours aimantée ; Maj = placement libre)"
+        >
+          Aimanter
+        </button>
+        <button
+          type="button"
+          class="btn ghost toggle"
+          [class.on]="graph()?.settings?.show_grid"
+          (click)="toggleSetting('show_grid')"
+          title="Afficher la grille"
+        >
+          Grille
+        </button>
+
         <label class="btn ghost file">
           Importer GEDCOM
           <input type="file" accept=".ged,.gedcom,text/plain" (change)="importGedcom($event)" hidden />
@@ -84,6 +103,26 @@
           class="viewport"
           [style.transform]="'translate(' + pan().x + 'px,' + pan().y + 'px) scale(' + zoom() + ')'"
         >
+          @if (data.settings.show_grid) {
+            <div
+              class="grid"
+              [ngStyle]="gridStyle()"
+              [style.width.px]="canvasSize().width"
+              [style.height.px]="canvasSize().height"
+            ></div>
+          }
+
+          @if (guide(); as line) {
+            <div
+              class="guide"
+              [class.horizontal]="line.horizontal"
+              [style.top.px]="line.horizontal ? line.at : 0"
+              [style.left.px]="line.horizontal ? 0 : line.at"
+              [style.width.px]="line.horizontal ? canvasSize().width : null"
+              [style.height.px]="line.horizontal ? null : canvasSize().height"
+            ></div>
+          }
+
           <svg
             class="edges"
             [attr.width]="canvasSize().width"

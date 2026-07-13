@@ -84,6 +84,14 @@
     display: inline-flex;
     align-items: center;
   }
+
+  // Bascule active : l'état doit se lire d'un coup d'œil.
+  &.toggle.on {
+    background: #e8f2fd;
+    border-color: #a8cdf3;
+    color: #1565c0;
+    font-weight: 600;
+  }
 }
 
 .banner {
@@ -163,6 +171,30 @@
   left: 0;
   pointer-events: none;
   overflow: visible;
+}
+
+.grid {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+// Trait d'aide : montre la ligne de génération sur laquelle la carte va se poser.
+.guide {
+  position: absolute;
+  background: #1976d2;
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 1;
+
+  &.horizontal {
+    height: 1px;
+  }
+
+  &:not(.horizontal) {
+    width: 1px;
+  }
 }
 
 .node {

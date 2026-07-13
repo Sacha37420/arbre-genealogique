@@ -1,9 +1,17 @@
+import { NgStyle } from '@angular/common';
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { ApiService } from '../../core/api.service';
-import { JUNCTION_SIZE, Positioned, computeLayout, edgePath } from '../../core/layout';
+import {
+  JUNCTION_SIZE,
+  Positioned,
+  computeLayout,
+  edgePath,
+  isHorizontal,
+  snapPosition,
+} from '../../core/layout';
 import { Edge, EdgeStyleSpec, FamilyNode, PersonCard, Timeline, TreeGraph } from '../../core/models';
 import { TreeStore, describeError } from '../../core/tree-store';
 import { FullCardComponent } from '../../shared/cards/full-card.component';
@@ -31,7 +39,7 @@ const DEFAULT_EDGE: EdgeStyleSpec = {
 @Component({
   selector: 'app-tree',
   standalone: true,
-  imports: [FormsModule, MiniCardComponent, FullCardComponent, PersonEditorComponent],
+  imports: [NgStyle, FormsModule, MiniCardComponent, FullCardComponent, PersonEditorComponent],
   templateUrl: './tree.component.html',
   styleUrl: './tree.component.scss',
 })
@@ -66,6 +74,9 @@ export class TreeComponent {
 
   /** Un vrai glissement se termine par un « click » : il ne doit pas ouvrir la fiche. */
   private suppressClick = false;
+
+  /** Ligne d'aimantation visée pendant le glissement (trait d'aide). */
+  readonly guide = signal<{ horizontal: boolean; at: number } | null>(null);
 
   readonly newPersonName = signal('');
   readonly busy = signal('');
@@ -223,9 +234,14 @@ export class TreeComponent {
       if (!this.drag.moved && Math.hypot(dx, dy) * scale < DRAG_THRESHOLD_PX) return;
       this.drag.moved = true;
 
+      const free = { x: this.drag.originX + dx, y: this.drag.originY + dy };
+      // Maj enfoncée : placement libre, pour l'exception que l'aimantation empêcherait.
+      const position = event.shiftKey ? free : this.snap(free);
+
       const next = new Map(this.moved());
-      next.set(this.drag.key, { x: this.drag.originX + dx, y: this.drag.originY + dy });
+      next.set(this.drag.key, position);
       this.moved.set(next);
+      this.guide.set(event.shiftKey ? null : this.guideFor(position));
       return;
     }
 
@@ -237,7 +253,32 @@ export class TreeComponent {
     }
   }
 
+  /** Aimante une position sur la ligne de génération la plus proche, et sur la grille. */
+  private snap(position: Positioned): Positioned {
+    const layout = this.layout();
+    const settings = this.graph()?.settings;
+    if (!layout || !settings) return position;
+
+    return snapPosition(position, {
+      rows: layout.rows,
+      orientation: settings.orientation || 'TB',
+      gridSize: settings.grid_size || 16,
+      snapToGrid: settings.snap_to_grid,
+    });
+  }
+
+  /** Trait d'aide montrant la ligne sur laquelle la carte va se poser. */
+  private guideFor(position: Positioned): { horizontal: boolean; at: number } | null {
+    const settings = this.graph()?.settings;
+    if (!settings) return null;
+
+    const horizontal = isHorizontal(settings.orientation || 'TB');
+    return { horizontal: !horizontal, at: horizontal ? position.x : position.y };
+  }
+
   onPointerUp(): void {
+    this.guide.set(null);
+
     if (this.drag) {
       const { key, moved } = this.drag;
       this.drag = null;
@@ -288,6 +329,36 @@ export class TreeComponent {
   resetView(): void {
     this.zoom.set(1);
     this.pan.set({ x: 0, y: 0 });
+  }
+
+  /**
+   * Bascule un réglage de vue (aimantation, grille) et le conserve.
+   *
+   * Ces réglages existaient déjà en base et dans l'API, mais rien ne les lisait :
+   * ils sont désormais branchés sur l'arbre et persistés d'une session à l'autre.
+   */
+  toggleSetting(key: 'snap_to_grid' | 'show_grid'): void {
+    const graph = this.graph();
+    const treeId = this.store.currentId();
+    if (!graph || treeId === null) return;
+
+    const value = !graph.settings[key];
+    this.graph.set({ ...graph, settings: { ...graph.settings, [key]: value } });
+
+    this.api.patchSettings(treeId, { [key]: value }).subscribe({
+      error: (err) => this.error.set(describeError(err)),
+    });
+  }
+
+  /** Motif de la grille, à l'échelle du canevas (il suit le zoom avec le contenu). */
+  gridStyle(): Record<string, string> {
+    const size = this.graph()?.settings.grid_size || 16;
+    return {
+      'background-image':
+        'linear-gradient(to right, rgba(20,30,45,0.06) 1px, transparent 1px),' +
+        'linear-gradient(to bottom, rgba(20,30,45,0.06) 1px, transparent 1px)',
+      'background-size': `${size}px ${size}px`,
+    };
   }
 
   // ── Sélection ─────────────────────────────────────────────────────────────
