@@ -141,6 +141,33 @@ class OwnedTreeMixin:
         if tree.owner_email != self.request.user.email:
             raise PermissionDenied("Cet arbre ne vous appartient pas.")
 
+    def _tree_of(self, validated: dict) -> Tree | None:
+        """
+        Remonte de l'objet écrit jusqu'à son arbre, en suivant `tree_path`.
+
+        Le filtrage par queryset ne protège que les objets existants : sans cette
+        vérification, une création pourrait viser l'arbre d'un autre utilisateur,
+        puisque `tree` (ou le parent) est fourni par le client.
+        """
+        parts = self.tree_path.split('__')
+        obj = validated.get(parts[0])
+        for part in parts[1:]:
+            obj = getattr(obj, part, None)
+        return obj if isinstance(obj, Tree) else None
+
+    def perform_create(self, serializer):
+        tree = self._tree_of(serializer.validated_data)
+        if tree is not None:
+            self.check_tree(tree)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        # Interdit aussi de *déplacer* un objet vers l'arbre d'autrui.
+        tree = self._tree_of(serializer.validated_data)
+        if tree is not None:
+            self.check_tree(tree)
+        serializer.save()
+
 
 class TreeViewSet(viewsets.ModelViewSet):
     """CRUD des arbres, plus le graphe, la frise, l'import et l'export GEDCOM."""

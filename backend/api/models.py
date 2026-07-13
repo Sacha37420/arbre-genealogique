@@ -302,7 +302,14 @@ class Individual(models.Model):
         db_table = 'individuals'
         ordering = ['id']
         constraints = [
-            models.UniqueConstraint(fields=['tree', 'xref_id'], name='uniq_indi_xref_per_tree'),
+            models.UniqueConstraint(
+                fields=['tree', 'xref_id'],
+                # Un xref n'est unique que s'il existe : les personnes saisies à la
+                # main n'en ont pas (il leur est attribué à l'export), et plusieurs
+                # xref vides doivent donc pouvoir coexister dans un même arbre.
+                condition=~models.Q(xref_id=''),
+                name='uniq_indi_xref_per_tree',
+            ),
         ]
         indexes = [models.Index(fields=['tree', 'sex'])]
 
@@ -365,7 +372,11 @@ class Family(models.Model):
         db_table = 'families'
         ordering = ['id']
         constraints = [
-            models.UniqueConstraint(fields=['tree', 'xref_id'], name='uniq_fam_xref_per_tree'),
+            models.UniqueConstraint(
+                fields=['tree', 'xref_id'],
+                condition=~models.Q(xref_id=''),
+                name='uniq_fam_xref_per_tree',
+            ),
         ]
 
     def __str__(self) -> str:

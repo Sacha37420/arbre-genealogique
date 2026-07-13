@@ -202,7 +202,10 @@ class IndividualSerializer(serializers.ModelSerializer):
             'full_name', 'birth_date', 'death_date', 'photo_url',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['uid', 'created_at', 'updated_at']
+        # xref_id est l'identifiant GEDCOM (@I1@) : il vient d'un import, jamais de
+        # l'interface. L'exposer en écriture ferait dériver de la contrainte
+        # d'unicité un validateur DRF qui le rendrait obligatoire.
+        read_only_fields = ['uid', 'xref_id', 'created_at', 'updated_at']
 
     def _primary_name(self, obj):
         return next((n for n in obj.names.all() if n.is_primary), None) or obj.names.first()
@@ -247,7 +250,7 @@ class IndividualWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Individual
-        fields = ['id', 'tree', 'xref_id', 'sex', 'is_living', 'confidential', 'note',
+        fields = ['id', 'tree', 'sex', 'is_living', 'confidential', 'note',
                   'custom', 'givn', 'surn']
 
     def create(self, validated_data):
@@ -297,7 +300,8 @@ class FamilySerializer(serializers.ModelSerializer):
             'id', 'tree', 'xref_id', 'union_type', 'note', 'custom',
             'spouses', 'children', 'events', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['created_at', 'updated_at']
+        # Même raison que pour Individual : l'xref @F1@ vient de l'import GEDCOM.
+        read_only_fields = ['xref_id', 'created_at', 'updated_at']
 
 
 class RepositorySerializer(serializers.ModelSerializer):
