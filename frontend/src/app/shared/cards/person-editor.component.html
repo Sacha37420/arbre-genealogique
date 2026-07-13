@@ -10,6 +10,9 @@
     @if (error()) {
       <p class="banner error">{{ error() }}</p>
     }
+    @if (busy()) {
+      <p class="banner info">{{ busy() }}</p>
+    }
 
     <!-- ── Identité ──────────────────────────────────────────────────────── -->
     <section>
@@ -56,19 +59,252 @@
         />
         Fiche confidentielle
       </label>
-
-      <p class="muted small">
-        « Vivant / décédé » n’est pas un champ : il découle des faits. Ajoutez un
-        événement de décès, d’inhumation ou de crémation et la personne bascule
-        automatiquement.
-      </p>
     </section>
+
+    <!-- ── Relations ─────────────────────────────────────────────────────── -->
+    @if (relations(); as rel) {
+      <section>
+        <h3>Relations</h3>
+        <p class="muted small">
+          Les liens sont enregistrés immédiatement (ils créent des personnes et des
+          familles). La famille qui porte le lien est choisie pour vous.
+        </p>
+
+        <!-- Parents et fratrie -->
+        <div class="relation-block">
+          <div class="relation-head">
+            <h4>Parents et fratrie</h4>
+            <span class="actions">
+              <button type="button" class="btn tiny" (click)="openAdd('PARENT')">+ Parent</button>
+              <button type="button" class="btn tiny" (click)="openAdd('SIBLING')">+ Frère/Sœur</button>
+            </span>
+          </div>
+
+          @for (family of rel.parent_families; track family.family) {
+            @for (parent of family.parents; track parent.link) {
+              <div class="person-row">
+                <span class="role">{{ parent.role === 'HUSB' ? 'Père' : parent.role === 'WIFE' ? 'Mère' : 'Parent' }}</span>
+                <span class="who">{{ parent.name }}</span>
+                <button type="button" class="icon danger" (click)="removeSpouse(parent.link)" aria-label="Retirer">×</button>
+              </div>
+            }
+            @for (sibling of family.siblings; track sibling.link) {
+              <div class="person-row">
+                <span class="role">Frère/Sœur</span>
+                <span class="who">{{ sibling.name }}</span>
+                <select
+                  class="input pedigree"
+                  [ngModel]="sibling.pedigree"
+                  (ngModelChange)="changePedigree(sibling.link, $event)"
+                >
+                  @for (type of pedigreeTypes; track type.value) {
+                    <option [value]="type.value">{{ type.label }}</option>
+                  }
+                </select>
+                <button type="button" class="icon danger" (click)="removeChild(sibling.link)" aria-label="Retirer">×</button>
+              </div>
+            }
+          }
+
+          @if (!rel.parent_families.length) {
+            <p class="muted small">Aucun parent connu.</p>
+          }
+
+          @if (adding() === 'PARENT' || adding() === 'SIBLING') {
+            <div class="add-form">
+              <select class="input" [ngModel]="pickedPerson()" (ngModelChange)="pickedPerson.set($event)">
+                <option [ngValue]="null">— Créer une nouvelle personne —</option>
+                @for (person of candidates(); track person.id) {
+                  <option [ngValue]="person.id">{{ person.label }}</option>
+                }
+              </select>
+
+              @if (pickedPerson() === null) {
+                <input class="input" placeholder="Prénom" [ngModel]="newGivn()" (ngModelChange)="newGivn.set($event)" />
+                <input class="input" placeholder="Nom" [ngModel]="newSurn()" (ngModelChange)="newSurn.set($event)" />
+                <select class="input narrow" [ngModel]="newSex()" (ngModelChange)="newSex.set($event)">
+                  @for (option of sexOptions; track option.value) {
+                    <option [ngValue]="option.value">{{ option.label }}</option>
+                  }
+                </select>
+              }
+
+              <button type="button" class="btn primary tiny" (click)="confirmAdd(adding()!)">Ajouter</button>
+              <button type="button" class="btn tiny" (click)="adding.set(null)">Annuler</button>
+            </div>
+          }
+        </div>
+
+        <!-- Unions et enfants -->
+        <div class="relation-block">
+          <div class="relation-head">
+            <h4>Unions et enfants</h4>
+            <span class="actions">
+              <button type="button" class="btn tiny" (click)="openAdd('SPOUSE')">+ Conjoint·e</button>
+              <button type="button" class="btn tiny" (click)="openAdd('CHILD')">+ Enfant</button>
+            </span>
+          </div>
+
+          @for (family of rel.spouse_families; track family.family) {
+            <div class="couple">
+              @for (spouse of family.spouses; track spouse.link) {
+                <div class="person-row">
+                  <span class="role">Conjoint·e</span>
+                  <span class="who">{{ spouse.name }}</span>
+                  <button type="button" class="icon danger" (click)="removeSpouse(spouse.link)" aria-label="Retirer">×</button>
+                </div>
+              }
+              @if (!family.spouses.length) {
+                <p class="muted small">Aucun conjoint — les enfants ci-dessous sont rattachés à cette personne seule.</p>
+              }
+
+              <!-- Période de l'union : début et fin -->
+              <div class="union">
+                <label>
+                  <span>Type d’union</span>
+                  <select
+                    class="input"
+                    [ngModel]="unionType(family)"
+                    (ngModelChange)="setUnionType(family, $event)"
+                  >
+                    @for (type of unionTypes; track type.value) {
+                      <option [value]="type.value">{{ type.label }}</option>
+                    }
+                  </select>
+                </label>
+
+                <label>
+                  <span>Début</span>
+                  <div class="pair">
+                    <select
+                      class="input narrow"
+                      [ngModel]="startEvent(family)?.tag ?? 'MARR'"
+                      (ngModelChange)="setStart(family, { tag: $event })"
+                    >
+                      @for (option of startTagOptions; track option.value) {
+                        <option [value]="option.value">{{ option.label }}</option>
+                      }
+                    </select>
+                    <input
+                      class="input"
+                      placeholder="3 JUN 1900"
+                      [ngModel]="startEvent(family)?.date_raw ?? ''"
+                      (ngModelChange)="setStart(family, { date_raw: $event })"
+                    />
+                  </div>
+                </label>
+
+                <label>
+                  <span>Fin</span>
+                  <div class="pair">
+                    <select
+                      class="input narrow"
+                      [ngModel]="endEvent(family)?.tag ?? ''"
+                      (ngModelChange)="setEndTag(family, $event)"
+                    >
+                      @for (option of endTagOptions; track option.value) {
+                        <option [value]="option.value">{{ option.label }}</option>
+                      }
+                    </select>
+                    @if (endEvent(family); as end) {
+                      <input
+                        class="input"
+                        placeholder="12 MAY 1925"
+                        [ngModel]="end.date_raw"
+                        (ngModelChange)="setEndDate(family, $event)"
+                      />
+                    }
+                  </div>
+                </label>
+              </div>
+
+              @if (unionSpan(family); as span) {
+                <p class="union-span">{{ span }}</p>
+              }
+
+              @for (child of family.children; track child.link) {
+                <div class="person-row">
+                  <span class="role">Enfant</span>
+                  <span class="who">{{ child.name }}</span>
+                  <select
+                    class="input pedigree"
+                    [ngModel]="child.pedigree"
+                    (ngModelChange)="changePedigree(child.link, $event)"
+                  >
+                    @for (type of pedigreeTypes; track type.value) {
+                      <option [value]="type.value">{{ type.label }}</option>
+                    }
+                  </select>
+                  <button type="button" class="icon danger" (click)="removeChild(child.link)" aria-label="Retirer">×</button>
+                </div>
+              }
+
+              <!-- Autres événements du couple : bans, contrat, licence… -->
+              @for (event of otherFamilyEvents(family); track event.id) {
+                <div class="event-row inline">
+                  <select class="input type" [ngModel]="event.tag" (ngModelChange)="changeTag(event.id, $event)">
+                    @for (type of typesFor(event); track type.tag) {
+                      <option [value]="type.tag">{{ type.label }}</option>
+                    }
+                  </select>
+                  <input
+                    class="input"
+                    placeholder="Date"
+                    [ngModel]="event.date_raw"
+                    (ngModelChange)="patchEvent(event.id, { date_raw: $event })"
+                  />
+                  <input
+                    class="input"
+                    placeholder="Lieu"
+                    [ngModel]="event.place_name"
+                    (ngModelChange)="patchEvent(event.id, { place_name: $event })"
+                  />
+                  <button type="button" class="icon danger" (click)="removeEvent(event.id)" aria-label="Supprimer">×</button>
+                </div>
+              }
+
+              <button type="button" class="btn tiny ghost" (click)="addOtherFamilyEvent(family)">
+                + Autre événement du couple (bans, contrat…)
+              </button>
+            </div>
+          }
+
+          @if (!rel.spouse_families.length) {
+            <p class="muted small">Aucune union ni enfant.</p>
+          }
+
+          @if (adding() === 'SPOUSE' || adding() === 'CHILD') {
+            <div class="add-form">
+              <select class="input" [ngModel]="pickedPerson()" (ngModelChange)="pickedPerson.set($event)">
+                <option [ngValue]="null">— Créer une nouvelle personne —</option>
+                @for (person of candidates(); track person.id) {
+                  <option [ngValue]="person.id">{{ person.label }}</option>
+                }
+              </select>
+
+              @if (pickedPerson() === null) {
+                <input class="input" placeholder="Prénom" [ngModel]="newGivn()" (ngModelChange)="newGivn.set($event)" />
+                <input class="input" placeholder="Nom" [ngModel]="newSurn()" (ngModelChange)="newSurn.set($event)" />
+                <select class="input narrow" [ngModel]="newSex()" (ngModelChange)="newSex.set($event)">
+                  @for (option of sexOptions; track option.value) {
+                    <option [ngValue]="option.value">{{ option.label }}</option>
+                  }
+                </select>
+              }
+
+              <button type="button" class="btn primary tiny" (click)="confirmAdd(adding()!)">Ajouter</button>
+              <button type="button" class="btn tiny" (click)="adding.set(null)">Annuler</button>
+            </div>
+          }
+        </div>
+      </section>
+    }
 
     <!-- ── Événements de la personne ─────────────────────────────────────── -->
     <section>
       <div class="section-head">
         <h3>Événements et périodes</h3>
-        <button type="button" class="btn ghost" (click)="addEvent('INDIVIDUAL')">+ Ajouter</button>
+        <button type="button" class="btn ghost tiny" (click)="addEvent()">+ Ajouter</button>
       </div>
 
       @if (!personalEvents().length) {
@@ -78,11 +314,7 @@
       @for (event of personalEvents(); track event.id) {
         <div class="event" [class.period]="event.is_period || looksLikePeriod(event)">
           <div class="event-row">
-            <select
-              class="input type"
-              [ngModel]="event.tag"
-              (ngModelChange)="changeTag(event.id, $event)"
-            >
+            <select class="input type" [ngModel]="event.tag" (ngModelChange)="changeTag(event.id, $event)">
               @for (type of typesFor(event); track type.tag) {
                 <option [value]="type.tag">{{ type.label }}</option>
               }
@@ -112,23 +344,16 @@
               (ngModelChange)="patchEvent(event.id, { place_name: $event })"
             />
 
-            <button
-              type="button"
-              class="icon"
-              (click)="toggleExpanded(event.id)"
-              [attr.aria-label]="event.expanded ? 'Replier' : 'Déplier'"
-            >
+            <button type="button" class="icon" (click)="toggleExpanded(event.id)" aria-label="Détails">
               {{ event.expanded ? '▴' : '▾' }}
             </button>
-            <button type="button" class="icon danger" (click)="removeEvent(event.id)" aria-label="Supprimer">
-              ×
-            </button>
+            <button type="button" class="icon danger" (click)="removeEvent(event.id)" aria-label="Supprimer">×</button>
           </div>
 
           @if (isAttribute(event)) {
             <input
               class="input full-width"
-              [placeholder]="'Valeur (ex. Charpentier)'"
+              placeholder="Valeur (ex. Charpentier)"
               [ngModel]="event.value"
               (ngModelChange)="patchEvent(event.id, { value: $event })"
             />
@@ -159,37 +384,19 @@
               </label>
               <label>
                 <span>Âge</span>
-                <input
-                  class="input"
-                  placeholder="72y"
-                  [ngModel]="event.age"
-                  (ngModelChange)="patchEvent(event.id, { age: $event })"
-                />
+                <input class="input" placeholder="72y" [ngModel]="event.age" (ngModelChange)="patchEvent(event.id, { age: $event })" />
               </label>
               <label>
                 <span>Cause</span>
-                <input
-                  class="input"
-                  [ngModel]="event.cause"
-                  (ngModelChange)="patchEvent(event.id, { cause: $event })"
-                />
+                <input class="input" [ngModel]="event.cause" (ngModelChange)="patchEvent(event.id, { cause: $event })" />
               </label>
               <label>
                 <span>Organisme</span>
-                <input
-                  class="input"
-                  [ngModel]="event.agency"
-                  (ngModelChange)="patchEvent(event.id, { agency: $event })"
-                />
+                <input class="input" [ngModel]="event.agency" (ngModelChange)="patchEvent(event.id, { agency: $event })" />
               </label>
               <label class="full">
                 <span>Note</span>
-                <textarea
-                  class="input"
-                  rows="2"
-                  [ngModel]="event.note"
-                  (ngModelChange)="patchEvent(event.id, { note: $event })"
-                ></textarea>
+                <textarea class="input" rows="2" [ngModel]="event.note" (ngModelChange)="patchEvent(event.id, { note: $event })"></textarea>
               </label>
             </div>
           }
@@ -198,67 +405,14 @@
 
       <p class="muted small syntax">
         <strong>Dates</strong> — la syntaxe GEDCOM permet de rester fidèle à la source :
-        <code>12 JAN 1875</code> · <code>JAN 1875</code> · <code>1875</code> ·
-        <code>ABT 1875</code> (vers) · <code>BEF 1900</code> / <code>AFT 1900</code> ·
-        <code>BET 1830 AND 1835</code> · <code>FROM 1901 TO 1918</code> (période).
+        <code>12 JAN 1875</code> · <code>1875</code> · <code>ABT 1875</code> (vers) ·
+        <code>BEF 1900</code> / <code>AFT 1900</code> · <code>BET 1830 AND 1835</code> ·
+        <code>FROM 1901 TO 1918</code> (période).
       </p>
     </section>
 
-    <!-- ── Événements familiaux ──────────────────────────────────────────── -->
-    @if (hasFamily()) {
-      <section>
-        <div class="section-head">
-          <h3>Événements de famille</h3>
-          <button type="button" class="btn ghost" (click)="addEvent('FAMILY')">+ Ajouter</button>
-        </div>
-        <p class="muted small">
-          Mariage, divorce… Ils appartiennent au couple, pas à la personne, mais
-          apparaissent sur sa frise.
-        </p>
-
-        @for (event of familyEvents(); track event.id) {
-          <div class="event" [class.period]="event.is_period || looksLikePeriod(event)">
-            <div class="event-row">
-              <select
-                class="input type"
-                [ngModel]="event.tag"
-                (ngModelChange)="changeTag(event.id, $event)"
-              >
-                @for (type of typesFor(event); track type.tag) {
-                  <option [value]="type.tag">{{ type.label }}</option>
-                }
-              </select>
-
-              <label class="field date">
-                <input
-                  class="input"
-                  placeholder="3 JUN 1900"
-                  [ngModel]="event.date_raw"
-                  (ngModelChange)="patchEvent(event.id, { date_raw: $event })"
-                />
-                @if (dateHint(event); as hint) {
-                  <small class="hint">{{ hint }}</small>
-                }
-              </label>
-
-              <input
-                class="input place"
-                placeholder="Lieu"
-                [ngModel]="event.place_name"
-                (ngModelChange)="patchEvent(event.id, { place_name: $event })"
-              />
-
-              <button type="button" class="icon danger" (click)="removeEvent(event.id)" aria-label="Supprimer">
-                ×
-              </button>
-            </div>
-          </div>
-        }
-      </section>
-    }
-
     <footer>
-      <button type="button" class="btn" (click)="closed.emit()">Annuler</button>
+      <button type="button" class="btn" (click)="closed.emit()">Fermer</button>
       <button type="button" class="btn primary" (click)="save()" [disabled]="saving() || !dirty()">
         {{ saving() ? 'Enregistrement…' : 'Enregistrer' }}
       </button>

@@ -1,6 +1,6 @@
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Observable, forkJoin, of } from 'rxjs';
+import { Observable, forkJoin } from 'rxjs';
 
 import { ApiService } from '../../core/api.service';
 import {
@@ -8,7 +8,14 @@ import {
   EventRecord,
   EventType,
   IndividualDetail,
+  PEDIGREE_TYPES,
+  PersonCard,
+  Relations,
   Sex,
+  SpouseFamily,
+  UNION_END_TAGS,
+  UNION_START_TAGS,
+  UNION_TYPES,
 } from '../../core/models';
 import { describeError } from '../../core/tree-store';
 import { formatGedcomDate } from './card-fields';
@@ -17,8 +24,8 @@ import { formatGedcomDate } from './card-fields';
  * Un événement en cours d'édition.
  *
  * Les créations reçoivent un id négatif temporaire : c'est ce qui permet de les
- * distinguer des événements déjà en base au moment d'enregistrer, sans les avoir
- * déjà envoyés au serveur.
+ * distinguer des événements déjà en base au moment d'enregistrer, sans avoir eu
+ * à les envoyer au serveur d'abord.
  */
 interface DraftEvent extends Partial<EventRecord> {
   id: number;
@@ -39,20 +46,20 @@ interface DraftEvent extends Partial<EventRecord> {
   expanded: boolean;
 }
 
+type Relation = 'PARENT' | 'SPOUSE' | 'CHILD' | 'SIBLING';
+
 let tempId = -1;
 
 /**
- * Édition complète d'une personne : identité, événements et périodes.
+ * Édition complète d'une personne : identité, relations, événements et périodes.
  *
- * Rien n'est envoyé au fil de la frappe : les modifications sont accumulées et
- * partent en un seul « Enregistrer ». Une fiche généalogique se relit et se
- * corrige d'un bloc, et un envoi par frappe multiplierait les allers-retours pour
- * un résultat plus fragile.
- *
- * La date se saisit dans la syntaxe GEDCOM (« ABT 1875 », « FROM 1901 TO 1918 ») :
- * c'est ce qui permet de dire « vers », « avant » ou « entre » sans mentir sur la
- * précision de la source. Une traduction en clair s'affiche sous le champ, et une
- * date en intervalle devient automatiquement une période sur la frise.
+ * Deux régimes d'enregistrement, et c'est délibéré :
+ *   · l'identité et les événements sont accumulés puis envoyés en un seul
+ *     « Enregistrer » — on relit et corrige une fiche d'un bloc ;
+ *   · les **relations** partent immédiatement, car ajouter un parent crée une
+ *     personne et une famille : différer ces créations rendrait l'écran menteur
+ *     (on verrait un lien qui n'existe pas encore) et la reprise sur erreur bien
+ *     plus fragile.
  */
 @Component({
   selector: 'app-person-editor',
@@ -65,16 +72,22 @@ export class PersonEditorComponent {
   private api = inject(ApiService);
 
   readonly individualId = input.required<number>();
+  /** Personnes déjà dans l'arbre : on peut rattacher l'une d'elles plutôt que d'en créer une. */
+  readonly people = input<PersonCard[]>([]);
 
   readonly closed = output<void>();
   readonly saved = output<void>();
+  /** Une relation a changé : l'arbre doit être redessiné, sans fermer l'éditeur. */
+  readonly relationsChanged = output<void>();
 
   readonly detail = signal<IndividualDetail | null>(null);
+  readonly relations = signal<Relations | null>(null);
   readonly events = signal<DraftEvent[]>([]);
   readonly eventTypes = signal<EventType[]>([]);
 
   readonly loading = signal(false);
   readonly saving = signal(false);
+  readonly busy = signal('');
   readonly error = signal('');
 
   // ── Identité ──────────────────────────────────────────────────────────────
@@ -84,6 +97,18 @@ export class PersonEditorComponent {
   readonly sex = signal<Sex>('U');
   readonly note = signal('');
   readonly confidential = signal(false);
+  private readonly identityDirty = signal(false);
+
+  // ── Ajout d'un proche ─────────────────────────────────────────────────────
+  /** Formulaire ouvert pour quelle relation ? (une seule à la fois) */
+  readonly adding = signal<Relation | null>(null);
+  readonly pickedPerson = signal<number | null>(null);
+  readonly newGivn = signal('');
+  readonly newSurn = signal('');
+  readonly newSex = signal<Sex>('U');
+
+  /** Modifications du type d'union, envoyées avec le reste. */
+  private readonly familyPatches = signal<Record<number, string>>({});
 
   readonly sexOptions: { value: Sex; label: string }[] = [
     { value: 'M', label: 'Masculin' },
@@ -91,8 +116,20 @@ export class PersonEditorComponent {
     { value: 'X', label: 'Autre / intersexe' },
     { value: 'U', label: 'Inconnu' },
   ];
-
+  readonly unionTypes = UNION_TYPES;
+  readonly pedigreeTypes = PEDIGREE_TYPES;
   readonly categoryOptions = Object.entries(CATEGORY_LABELS).map(([key, label]) => ({ key, label }));
+
+  readonly startTagOptions = [
+    { value: 'MARR', label: 'Mariage' },
+    { value: 'ENGA', label: 'Fiançailles' },
+  ];
+  readonly endTagOptions = [
+    { value: '', label: 'Union en cours' },
+    { value: 'DIV', label: 'Divorce' },
+    { value: 'SEPA', label: 'Séparation' },
+    { value: 'ANUL', label: 'Annulation' },
+  ];
 
   readonly individualTypes = computed(() =>
     this.eventTypes().filter((t) => t.scope === 'INDIVIDUAL'),
@@ -100,19 +137,24 @@ export class PersonEditorComponent {
   readonly familyTypes = computed(() => this.eventTypes().filter((t) => t.scope === 'FAMILY'));
 
   readonly visibleEvents = computed(() => this.events().filter((e) => !e.deleted));
-
   readonly personalEvents = computed(() => this.visibleEvents().filter((e) => e.individual !== null));
-  readonly familyEvents = computed(() => this.visibleEvents().filter((e) => e.family !== null));
 
-  readonly hasFamily = computed(() => (this.detail()?.spouse_families.length ?? 0) > 0);
+  /** Personnes rattachables : tout l'arbre sauf la personne éditée. */
+  readonly candidates = computed(() =>
+    this.people()
+      .filter((p) => p.id !== this.individualId())
+      .map((p) => ({
+        id: p.id,
+        label: `${p.full_name || 'Sans nom'}${p.birth_year ? ` (${p.birth_year})` : ''}`,
+      })),
+  );
 
   readonly dirty = computed(
     () =>
       this.identityDirty() ||
+      Object.keys(this.familyPatches()).length > 0 ||
       this.events().some((e) => e.dirty || e.deleted || e.id < 0),
   );
-
-  private readonly identityDirty = signal(false);
 
   constructor() {
     this.api.getEventTypes().subscribe({
@@ -123,13 +165,19 @@ export class PersonEditorComponent {
     effect(() => this.load(this.individualId()));
   }
 
+  // ── Chargement ────────────────────────────────────────────────────────────
   private load(id: number): void {
     this.loading.set(true);
     this.error.set('');
 
-    this.api.getIndividual(id).subscribe({
-      next: (detail) => {
+    forkJoin({
+      detail: this.api.getIndividual(id),
+      relations: this.api.getRelations(id),
+    }).subscribe({
+      next: ({ detail, relations }) => {
         this.detail.set(detail);
+        this.relations.set(relations);
+
         this.givn.set(detail.given_name);
         this.surn.set(detail.surname);
         this.nick.set(detail.nickname);
@@ -137,32 +185,12 @@ export class PersonEditorComponent {
         this.note.set(detail.note);
         this.confidential.set(detail.confidential);
         this.identityDirty.set(false);
+        this.familyPatches.set({});
 
-        const drafts = detail.events.map((e) => this.toDraft(e));
-
-        // Les mariages et divorces appartiennent à la famille, pas à la personne :
-        // ils figurent pourtant sur sa frise, donc ils doivent être éditables ici.
-        const familyCalls = detail.spouse_families.map((familyId) =>
-          this.api.getFamilyEvents(familyId),
-        );
-
-        if (!familyCalls.length) {
-          this.events.set(drafts);
-          this.loading.set(false);
-          return;
-        }
-
-        forkJoin(familyCalls).subscribe({
-          next: (groups) => {
-            this.events.set([...drafts, ...groups.flat().map((e) => this.toDraft(e))]);
-            this.loading.set(false);
-          },
-          error: (err) => {
-            this.events.set(drafts);
-            this.loading.set(false);
-            this.error.set(describeError(err));
-          },
-        });
+        // Les événements de famille viennent des relations : ce sont ceux du couple.
+        const familyEvents = relations.spouse_families.flatMap((f) => f.events);
+        this.events.set([...detail.events, ...familyEvents].map((e) => this.toDraft(e)));
+        this.loading.set(false);
       },
       error: (err) => {
         this.loading.set(false);
@@ -171,18 +199,232 @@ export class PersonEditorComponent {
     });
   }
 
+  /** Recharge les relations après une modification structurelle, sans perdre la saisie. */
+  private reloadRelations(): void {
+    this.api.getRelations(this.individualId()).subscribe({
+      next: (relations) => {
+        this.relations.set(relations);
+
+        // Les événements de famille ont pu changer de famille : on ne conserve que
+        // les brouillons non enregistrés, et on reprend le reste du serveur.
+        const drafts = this.events().filter((e) => e.id < 0 || e.dirty || e.deleted);
+        const fresh = relations.spouse_families
+          .flatMap((f) => f.events)
+          .filter((e) => !drafts.some((d) => d.id === e.id))
+          .map((e) => this.toDraft(e));
+        const personal = this.events().filter((e) => e.individual !== null);
+
+        this.events.set([
+          ...personal,
+          ...fresh,
+          ...drafts.filter((d) => d.family !== null),
+        ]);
+        this.busy.set('');
+        this.relationsChanged.emit();
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
   private toDraft(event: EventRecord): DraftEvent {
-    return {
-      ...event,
-      dirty: false,
-      deleted: false,
-      expanded: false,
-    };
+    return { ...event, dirty: false, deleted: false, expanded: false };
   }
 
   // ── Identité ──────────────────────────────────────────────────────────────
   touchIdentity(): void {
     this.identityDirty.set(true);
+  }
+
+  // ── Relations ─────────────────────────────────────────────────────────────
+  openAdd(relation: Relation): void {
+    this.adding.set(this.adding() === relation ? null : relation);
+    this.pickedPerson.set(null);
+    this.newGivn.set('');
+    this.newSurn.set('');
+    this.newSex.set(relation === 'PARENT' ? 'U' : 'U');
+  }
+
+  confirmAdd(relation: Relation): void {
+    const existing = this.pickedPerson();
+    const payload = existing
+      ? { relation, individual: existing }
+      : {
+          relation,
+          givn: this.newGivn().trim(),
+          surn: this.newSurn().trim(),
+          sex: this.newSex(),
+        };
+
+    if (!existing && !payload.givn && !payload.surn) {
+      this.error.set('Choisissez une personne existante ou saisissez un nom.');
+      return;
+    }
+
+    this.busy.set('Ajout du lien…');
+    this.error.set('');
+
+    this.api.addRelative(this.individualId(), payload).subscribe({
+      next: () => {
+        this.adding.set(null);
+        this.reloadRelations();
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  removeSpouse(linkId: number): void {
+    this.busy.set('Suppression du lien…');
+    this.api.removeSpouseLink(linkId).subscribe({
+      next: () => this.reloadRelations(),
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  removeChild(linkId: number): void {
+    this.busy.set('Suppression du lien…');
+    this.api.removeChildLink(linkId).subscribe({
+      next: () => this.reloadRelations(),
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  /** Le type de filiation (adopté, accueil…) est structurel : il part immédiatement. */
+  changePedigree(linkId: number, pedigree: string): void {
+    this.busy.set('Mise à jour…');
+    this.api.updateChildLink(linkId, { pedigree }).subscribe({
+      next: () => this.reloadRelations(),
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  // ── Union : type, début, fin ───────────────────────────────────────────────
+  unionType(family: SpouseFamily): string {
+    return this.familyPatches()[family.family] ?? family.union_type;
+  }
+
+  setUnionType(family: SpouseFamily, value: string): void {
+    this.familyPatches.update((patches) => ({ ...patches, [family.family]: value }));
+  }
+
+  startEvent(family: SpouseFamily): DraftEvent | null {
+    return (
+      this.visibleEvents().find(
+        (e) => e.family === family.family && UNION_START_TAGS.includes(e.tag),
+      ) ?? null
+    );
+  }
+
+  endEvent(family: SpouseFamily): DraftEvent | null {
+    return (
+      this.visibleEvents().find(
+        (e) => e.family === family.family && UNION_END_TAGS.includes(e.tag),
+      ) ?? null
+    );
+  }
+
+  /** Événements du couple qui ne sont ni son début ni sa fin (bans, contrat…). */
+  otherFamilyEvents(family: SpouseFamily): DraftEvent[] {
+    return this.visibleEvents().filter(
+      (e) =>
+        e.family === family.family &&
+        !UNION_START_TAGS.includes(e.tag) &&
+        !UNION_END_TAGS.includes(e.tag),
+    );
+  }
+
+  setStart(family: SpouseFamily, changes: { tag?: string; date_raw?: string }): void {
+    const existing = this.startEvent(family);
+    if (existing) {
+      this.patchEvent(existing.id, changes);
+      return;
+    }
+    this.addFamilyEvent(family, changes.tag ?? 'MARR', changes.date_raw ?? '');
+  }
+
+  setEndTag(family: SpouseFamily, tag: string): void {
+    const existing = this.endEvent(family);
+
+    // « Union en cours » : la fin est retirée.
+    if (!tag) {
+      if (existing) this.removeEvent(existing.id);
+      return;
+    }
+    if (existing) {
+      this.patchEvent(existing.id, { tag, category: 'FAMILY' });
+      return;
+    }
+    this.addFamilyEvent(family, tag, '');
+  }
+
+  setEndDate(family: SpouseFamily, date: string): void {
+    const existing = this.endEvent(family);
+    if (existing) {
+      this.patchEvent(existing.id, { date_raw: date });
+      return;
+    }
+    // Une date de fin saisie sans avoir choisi la nature : on suppose un divorce.
+    this.addFamilyEvent(family, 'DIV', date);
+  }
+
+  private addFamilyEvent(family: SpouseFamily, tag: string, date_raw: string): void {
+    const detail = this.detail();
+    if (!detail) return;
+
+    this.events.update((list) => [
+      ...list,
+      {
+        id: tempId--,
+        tree: detail.tree,
+        individual: null,
+        family: family.family,
+        tag,
+        custom_type: '',
+        value: '',
+        date_raw,
+        place_name: '',
+        age: '',
+        cause: '',
+        agency: '',
+        note: '',
+        category: 'FAMILY',
+        is_period: false,
+        is_attribute: false,
+        label: '',
+        sort_order: 0,
+        dirty: true,
+        deleted: false,
+        expanded: false,
+      },
+    ]);
+  }
+
+  /** Résumé lisible de la période d'union, affiché sous le couple. */
+  unionSpan(family: SpouseFamily): string {
+    const start = this.startEvent(family)?.date_raw;
+    const end = this.endEvent(family);
+
+    if (!start && !end?.date_raw) return '';
+    const from = start ? formatGedcomDate(start) : '?';
+    if (!end) return `depuis ${from}`;
+
+    const kind = this.endTagOptions.find((o) => o.value === end.tag)?.label ?? 'fin';
+    const to = end.date_raw ? formatGedcomDate(end.date_raw) : '?';
+    return `${from} → ${to} (${kind.toLowerCase()})`;
   }
 
   // ── Événements ────────────────────────────────────────────────────────────
@@ -198,22 +440,18 @@ export class PersonEditorComponent {
     );
   }
 
-  addEvent(scope: 'INDIVIDUAL' | 'FAMILY'): void {
+  addEvent(): void {
     const detail = this.detail();
     if (!detail) return;
 
-    const family = scope === 'FAMILY' ? (detail.spouse_families[0] ?? null) : null;
-    if (scope === 'FAMILY' && family === null) return;
-
-    const type = (scope === 'FAMILY' ? this.familyTypes() : this.individualTypes())[0];
-
+    const type = this.individualTypes()[0];
     this.events.update((list) => [
       ...list,
       {
         id: tempId--,
         tree: detail.tree,
-        individual: scope === 'INDIVIDUAL' ? detail.id : null,
-        family,
+        individual: detail.id,
+        family: null,
         tag: type?.tag ?? 'EVEN',
         custom_type: '',
         value: '',
@@ -235,19 +473,20 @@ export class PersonEditorComponent {
     ]);
   }
 
+  addOtherFamilyEvent(family: SpouseFamily): void {
+    this.addFamilyEvent(family, 'MARB', '');
+  }
+
   removeEvent(id: number): void {
-    // Une création jamais envoyée disparaît ; un événement existant est marqué
-    // pour suppression, effective à l'enregistrement.
+    // Une création jamais envoyée disparaît ; un événement existant est marqué pour
+    // suppression, effective à l'enregistrement.
     if (id < 0) {
       this.events.update((list) => list.filter((e) => e.id !== id));
       return;
     }
-    this.events.update((list) =>
-      list.map((e) => (e.id === id ? { ...e, deleted: true } : e)),
-    );
+    this.events.update((list) => list.map((e) => (e.id === id ? { ...e, deleted: true } : e)));
   }
 
-  /** Le type dicte la catégorie de frise et le fait qu'il porte une valeur. */
   changeTag(id: number, tag: string): void {
     const type = this.eventTypes().find((t) => t.tag === tag);
     this.patchEvent(id, {
@@ -270,10 +509,12 @@ export class PersonEditorComponent {
     return event.tag === 'EVEN' || event.tag === 'FACT';
   }
 
-  /** Traduction en clair de la date GEDCOM saisie, affichée sous le champ. */
   dateHint(event: DraftEvent): string {
-    if (!event.date_raw.trim()) return '';
-    return formatGedcomDate(event.date_raw);
+    return event.date_raw.trim() ? formatGedcomDate(event.date_raw) : '';
+  }
+
+  hint(raw: string): string {
+    return raw?.trim() ? formatGedcomDate(raw) : '';
   }
 
   /** Un intervalle (FROM…TO, BET…AND) devient une période sur la frise. */
@@ -304,6 +545,10 @@ export class PersonEditorComponent {
       );
     }
 
+    for (const [family, unionType] of Object.entries(this.familyPatches())) {
+      calls.push(this.api.updateFamily(Number(family), { union_type: unionType }));
+    }
+
     for (const event of this.events()) {
       if (event.deleted) {
         if (event.id > 0) calls.push(this.api.deleteEvent(event.id));
@@ -320,7 +565,7 @@ export class PersonEditorComponent {
       return;
     }
 
-    forkJoin(calls.length ? calls : [of(null)]).subscribe({
+    forkJoin(calls).subscribe({
       next: () => {
         this.saving.set(false);
         this.saved.emit();

@@ -324,9 +324,21 @@ export class TreeComponent {
    * l'arbre en désaccord avec elle.
    */
   onEdited(): void {
+    this.editing.set(false);
+    this.refreshGraph();
+  }
+
+  /**
+   * Redessine l'arbre en gardant la fiche ouverte.
+   *
+   * Une modification déborde toujours de la fiche : une date de décès change le
+   * style de la carte (règle « décédé »), un nouveau parent ajoute une carte et
+   * décale les générations. Recharger la seule fiche laisserait l'arbre en
+   * désaccord avec elle.
+   */
+  refreshGraph(): void {
     const treeId = this.store.currentId();
     const id = this.selected()?.id;
-    this.editing.set(false);
     if (treeId === null) return;
 
     this.api.getGraph(treeId).subscribe({

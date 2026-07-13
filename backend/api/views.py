@@ -42,6 +42,7 @@ from .models import (
     MediaObject,
     NodeLayout,
     NodeStyle,
+    Pedigree,
     PersonalName,
     Place,
     Repository,
@@ -348,33 +349,61 @@ class IndividualViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
     def timeline(self, request, pk=None):
         return Response(build_timeline(self.get_object()))
 
-    @extend_schema(summary='Proches directs (parents, conjoints, enfants, fratrie)')
+    @extend_schema(
+        summary='Relations d’une personne (parents, fratrie, unions, enfants)',
+        description='Structuré par famille, comme en GEDCOM : il n’existe pas de lien '
+                    'direct « X est le père de Y », tout passe par la famille. Chaque '
+                    'entrée porte l’identifiant de son lien (link), pour pouvoir le '
+                    'modifier ou le supprimer.',
+    )
     @action(detail=True, methods=['get'])
-    def relatives(self, request, pk=None):
-        indi = self.get_object()
-        parents, siblings, spouses, children = [], [], [], []
+    def relations(self, request, pk=None):
+        return Response(describe_relations(self.get_object()))
 
-        for link in indi.families_as_child.select_related('family'):
-            for spouse in link.family.spouses.select_related('individual'):
-                parents.append(spouse.individual)
-            for child in link.family.children.select_related('individual'):
-                if child.individual_id != indi.pk:
-                    siblings.append(child.individual)
+    @extend_schema(
+        summary='Ajouter un proche',
+        description='Crée le lien — et la famille qui le porte si elle n’existe pas encore. '
+                    'Corps : {"relation": "PARENT|SPOUSE|CHILD|SIBLING", '
+                    '"individual": <id existant>} ou, pour créer la personne au passage, '
+                    '{"relation": "...", "givn": "Jean", "surn": "Dupont", "sex": "M"}. '
+                    'Renvoie les relations mises à jour.',
+    )
+    @action(detail=True, methods=['post'])
+    def add_relative(self, request, pk=None):
+        individual = self.get_object()
+        self.check_tree(individual.tree)
 
-        for link in indi.families_as_spouse.select_related('family'):
-            for spouse in link.family.spouses.select_related('individual'):
-                if spouse.individual_id != indi.pk:
-                    spouses.append(spouse.individual)
-            for child in link.family.children.select_related('individual'):
-                children.append(child.individual)
+        relation = (request.data.get('relation') or '').upper()
+        if relation not in ('PARENT', 'SPOUSE', 'CHILD', 'SIBLING'):
+            raise ValidationError('« relation » doit valoir PARENT, SPOUSE, CHILD ou SIBLING.')
 
-        serialize = lambda people: IndividualSerializer(people, many=True).data  # noqa: E731
-        return Response({
-            'parents': serialize(parents),
-            'siblings': serialize(siblings),
-            'spouses': serialize(spouses),
-            'children': serialize(children),
-        })
+        with transaction.atomic():
+            other = self._resolve_relative(request, individual.tree)
+            if other.pk == individual.pk:
+                raise ValidationError('Une personne ne peut pas être son propre proche.')
+            link_relative(individual, other, relation, pedigree=request.data.get('pedigree'))
+
+        return Response(describe_relations(individual), status=status.HTTP_201_CREATED)
+
+    def _resolve_relative(self, request, tree: Tree) -> Individual:
+        """Le proche est soit déjà dans l'arbre, soit créé à la volée depuis son nom."""
+        if individual_id := request.data.get('individual'):
+            other = Individual.objects.filter(pk=individual_id, tree=tree).first()
+            if other is None:
+                raise ValidationError('Cette personne n’appartient pas à l’arbre.')
+            return other
+
+        givn = (request.data.get('givn') or '').strip()
+        surn = (request.data.get('surn') or '').strip()
+        if not (givn or surn):
+            raise ValidationError('Fournir « individual », ou un nom pour créer la personne.')
+
+        sex = request.data.get('sex', Sex.UNKNOWN)
+        other = Individual.objects.create(
+            tree=tree, sex=sex if sex in Sex.values else Sex.UNKNOWN,
+        )
+        PersonalName.objects.create(individual=other, givn=givn, surn=surn, is_primary=True)
+        return other
 
 
 class PersonalNameViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
@@ -996,6 +1025,145 @@ class EnrichmentMatchViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
 class ImportJobViewSet(OwnedTreeMixin, viewsets.ReadOnlyModelViewSet):
     queryset = ImportJob.objects.all()
     serializer_class = ImportJobSerializer
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Relations — tout passe par la famille, comme en GEDCOM
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _person_ref(individual: Individual, link_id: int, **extra) -> dict:
+    """Une personne telle qu'elle apparaît dans une liste de proches."""
+    return {
+        'id': individual.pk,
+        'name': str(individual),
+        'sex': individual.sex,
+        'is_living': individual.is_living,
+        'link': link_id,  # identifiant du lien, pour le modifier ou le supprimer
+        **extra,
+    }
+
+
+def describe_relations(individual: Individual) -> dict:
+    """
+    Toutes les relations d'une personne, groupées par famille.
+
+    Les parents ne sont pas un champ : ce sont les conjoints de la famille où la
+    personne est enfant. La fratrie, les autres enfants de cette même famille.
+    Cette structure est ce qui permet remariages, demi-frères et adoption.
+    """
+    parent_families = []
+    for link in individual.families_as_child.select_related('family'):
+        family = link.family
+        parent_families.append({
+            'family': family.pk,
+            'union_type': family.union_type,
+            'link': link.pk,          # le lien enfant de *cette* personne
+            'pedigree': link.pedigree,
+            'status': link.status,
+            'parents': [
+                _person_ref(s.individual, s.pk, role=s.role)
+                for s in family.spouses.select_related('individual')
+            ],
+            'siblings': [
+                _person_ref(c.individual, c.pk, pedigree=c.pedigree)
+                for c in family.children.select_related('individual')
+                if c.individual_id != individual.pk
+            ],
+        })
+
+    spouse_families = []
+    for link in individual.families_as_spouse.select_related('family'):
+        family = link.family
+        spouse_families.append({
+            'family': family.pk,
+            'union_type': family.union_type,
+            'link': link.pk,
+            'role': link.role,
+            'spouses': [
+                _person_ref(s.individual, s.pk, role=s.role)
+                for s in family.spouses.select_related('individual')
+                if s.individual_id != individual.pk
+            ],
+            'children': [
+                _person_ref(c.individual, c.pk, pedigree=c.pedigree)
+                for c in family.children.select_related('individual')
+            ],
+            # Début et fin de l'union (MARR, DIV…) sont des événements de la famille.
+            'events': EventSerializer(
+                family.events.select_related('place'), many=True,
+            ).data,
+        })
+
+    return {
+        'individual': individual.pk,
+        'parent_families': parent_families,
+        'spouse_families': spouse_families,
+    }
+
+
+def _family_as_child(individual: Individual, create: bool = False) -> Family | None:
+    """Famille où la personne est enfant — celle qui porte ses parents et sa fratrie."""
+    link = individual.families_as_child.select_related('family').first()
+    if link:
+        return link.family
+    if not create:
+        return None
+
+    family = Family.objects.create(tree=individual.tree)
+    FamilyChild.objects.create(family=family, individual=individual)
+    return family
+
+
+def _family_as_spouse(individual: Individual, create: bool = False) -> Family | None:
+    """Famille où la personne est conjoint — celle qui porte son union et ses enfants."""
+    link = individual.families_as_spouse.select_related('family').first()
+    if link:
+        return link.family
+    if not create:
+        return None
+
+    family = Family.objects.create(tree=individual.tree)
+    FamilySpouse.objects.create(family=family, individual=individual, role=_role_for(individual))
+    return family
+
+
+def link_relative(
+    individual: Individual,
+    other: Individual,
+    relation: str,
+    pedigree: str | None = None,
+) -> Family:
+    """
+    Rattache `other` à `individual`, en créant au besoin la famille qui porte le lien.
+
+    C'est là que se niche la subtilité que l'interface n'a pas à connaître : un
+    parent s'ajoute à la famille où la personne est *enfant*, un enfant à celle où
+    elle est *conjoint*. Deux familles différentes, selon le sens du lien.
+    """
+    if relation in ('PARENT', 'SIBLING'):
+        family = _family_as_child(individual, create=True)
+    else:  # SPOUSE, CHILD
+        family = _family_as_spouse(individual, create=True)
+
+    if relation == 'PARENT':
+        FamilySpouse.objects.get_or_create(
+            family=family, individual=other, defaults={'role': _role_for(other)},
+        )
+    elif relation == 'SPOUSE':
+        FamilySpouse.objects.get_or_create(
+            family=family, individual=other, defaults={'role': _role_for(other)},
+        )
+    else:  # CHILD, SIBLING
+        FamilyChild.objects.get_or_create(
+            family=family,
+            individual=other,
+            defaults={
+                'pedigree': pedigree if pedigree in Pedigree.values else Pedigree.BIRTH,
+                'order': family.children.count(),
+            },
+        )
+
+    return family
 
 
 # ─────────────────────────────────────────────────────────────────────────────

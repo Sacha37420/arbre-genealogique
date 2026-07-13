@@ -146,8 +146,10 @@
       @if (editing()) {
         <app-person-editor
           [individualId]="card.id"
+          [people]="graph()?.nodes ?? []"
           (closed)="editing.set(false)"
           (saved)="onEdited()"
+          (relationsChanged)="refreshGraph()"
         />
       } @else {
         <app-full-card

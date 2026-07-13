@@ -306,6 +306,68 @@ export interface EventRecord {
   is_attribute: boolean;
 }
 
+/** Un proche dans une liste de relations. `link` identifie le lien, pas la personne. */
+export interface RelativeRef {
+  id: number;
+  name: string;
+  sex: Sex;
+  is_living: boolean;
+  /** Id du FamilySpouse ou du FamilyChild : c'est lui qu'on modifie ou supprime. */
+  link: number;
+  role?: string;
+  pedigree?: string;
+}
+
+/** Famille où la personne est enfant : elle porte ses parents et sa fratrie. */
+export interface ParentFamily {
+  family: number;
+  union_type: string;
+  link: number;
+  pedigree: string;
+  status: string;
+  parents: RelativeRef[];
+  siblings: RelativeRef[];
+}
+
+/** Famille où la personne est conjoint : elle porte son union et ses enfants. */
+export interface SpouseFamily {
+  family: number;
+  union_type: string;
+  link: number;
+  role: string;
+  spouses: RelativeRef[];
+  children: RelativeRef[];
+  /** Début et fin de l'union (MARR, ENGA, DIV, SEPA, ANUL) sont des événements. */
+  events: EventRecord[];
+}
+
+export interface Relations {
+  individual: number;
+  parent_families: ParentFamily[];
+  spouse_families: SpouseFamily[];
+}
+
+export const UNION_TYPES: { value: string; label: string }[] = [
+  { value: 'MARRIED', label: 'Mariage' },
+  { value: 'CIVIL', label: 'Union civile / PACS' },
+  { value: 'PARTNERS', label: 'Union libre' },
+  { value: 'UNKNOWN', label: 'Non précisé' },
+];
+
+export const PEDIGREE_TYPES: { value: string; label: string }[] = [
+  { value: 'BIRTH', label: 'Biologique' },
+  { value: 'ADOPTED', label: 'Adopté·e' },
+  { value: 'FOSTER', label: 'Famille d’accueil' },
+  { value: 'STEP', label: 'Bel-enfant' },
+  { value: 'OTHER', label: 'Autre' },
+];
+
+/** Événements qui ouvrent une union. */
+export const UNION_START_TAGS = ['MARR', 'ENGA'];
+
+/** Événements qui la referment — une union peut donc avoir une fin datée. */
+export const UNION_END_TAGS = ['DIV', 'SEPA', 'ANUL'];
+
 export interface PersonalName {
   id: number;
   type: string;

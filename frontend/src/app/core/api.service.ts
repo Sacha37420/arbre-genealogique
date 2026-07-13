@@ -10,6 +10,7 @@ import {
   IndividualDetail,
   Provider,
   ProviderResult,
+  Relations,
   SearchPayload,
   Timeline,
   Tree,
@@ -106,6 +107,49 @@ export class ApiService {
   /** Événements d'une famille (mariage, divorce…) : ils figurent sur la frise de ses conjoints. */
   getFamilyEvents(familyId: number): Observable<EventRecord[]> {
     return this.list<EventRecord>(`${this.base}/api/events/?family=${familyId}`);
+  }
+
+  // ── Relations ─────────────────────────────────────────────────────────────
+  getRelations(individualId: number): Observable<Relations> {
+    return this.http.get<Relations>(`${this.base}/api/individuals/${individualId}/relations/`);
+  }
+
+  /**
+   * Ajoute un proche. Le serveur crée la famille qui porte le lien si besoin —
+   * un parent va dans la famille où la personne est enfant, un enfant dans celle
+   * où elle est conjoint : deux familles différentes selon le sens du lien.
+   */
+  addRelative(
+    individualId: number,
+    payload: {
+      relation: 'PARENT' | 'SPOUSE' | 'CHILD' | 'SIBLING';
+      individual?: number;
+      givn?: string;
+      surn?: string;
+      sex?: string;
+      pedigree?: string;
+    },
+  ): Observable<Relations> {
+    return this.http.post<Relations>(
+      `${this.base}/api/individuals/${individualId}/add_relative/`,
+      payload,
+    );
+  }
+
+  removeSpouseLink(linkId: number): Observable<unknown> {
+    return this.http.delete(`${this.base}/api/family-spouses/${linkId}/`);
+  }
+
+  removeChildLink(linkId: number): Observable<unknown> {
+    return this.http.delete(`${this.base}/api/family-children/${linkId}/`);
+  }
+
+  updateChildLink(linkId: number, payload: { pedigree?: string }): Observable<unknown> {
+    return this.http.patch(`${this.base}/api/family-children/${linkId}/`, payload);
+  }
+
+  updateFamily(id: number, payload: { union_type?: string }): Observable<unknown> {
+    return this.http.patch(`${this.base}/api/families/${id}/`, payload);
   }
 
   createIndividual(payload: {
