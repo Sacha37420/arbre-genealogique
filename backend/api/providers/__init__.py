@@ -6,6 +6,7 @@ les endpoints /api/enrich/* la découvrent automatiquement, et l'interface affic
 son formulaire de clé sans changement côté front.
 """
 from .base import PersonResult, Provider, ProviderError, Relative, SearchQuery
+from .deces_insee import DecesInseeProvider
 from .familysearch import FamilySearchProvider
 from .geni import GeniProvider
 from .geocoding import Geocoder
@@ -16,9 +17,13 @@ from .wikitree import WikiTreeProvider
 PROVIDERS: dict[str, type[Provider]] = {
     provider.key: provider
     for provider in (
+        # En tête : c'est la seule source d'état civil **officiel** accessible sans
+        # clé, et la seule qui couvre les gens ordinaires plutôt que les profils
+        # qu'un bénévole a bien voulu saisir.
+        DecesInseeProvider,    # sans clé
         WikiTreeProvider,      # sans clé
         WikidataProvider,      # sans clé
-        FamilySearchProvider,  # access_token
+        FamilySearchProvider,  # access_token — API fermée au public depuis 2024
         GeniProvider,          # access_token
         MyHeritageProvider,    # access_token
     )

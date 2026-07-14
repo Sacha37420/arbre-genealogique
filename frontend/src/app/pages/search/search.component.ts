@@ -36,7 +36,10 @@ export class SearchComponent {
   readonly store = inject(TreeStore);
 
   readonly providers = signal<Provider[]>([]);
-  readonly providerKey = signal<string>('wikitree');
+  // Le fichier des décès est la seule source d'état civil officiel accessible sans
+  // clé : c'est celle qui a le plus de chances de reconnaître un ancêtre ordinaire,
+  // là où les arbres collaboratifs ne contiennent que ce qu'un bénévole a saisi.
+  readonly providerKey = signal<string>('deces-insee');
   readonly credentials = signal<Record<string, Record<string, string>>>(readCredentials());
   readonly showKeys = signal(false);
 

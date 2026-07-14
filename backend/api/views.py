@@ -52,6 +52,7 @@ from .models import (
     SpouseRole,
     StyleRule,
     Tree,
+    TreeShare,
     TreeViewSettings,
     UserRecord,
 )
@@ -82,6 +83,7 @@ from .serializers import (
     SourceSerializer,
     StyleRuleSerializer,
     TreeSerializer,
+    TreeShareSerializer,
     TreeViewSettingsSerializer,
 )
 
@@ -110,19 +112,52 @@ class MeView(APIView):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TreeOwnerMixin:
-    """Propriété d'un arbre — partagé par TreeViewSet et toutes les ressources filles."""
+    """
+    Accès à un arbre — partagé par TreeViewSet et toutes les ressources filles.
+
+    Trois niveaux, et tout le reste de l'API en découle :
+      · lecture   — le propriétaire, les arbres publics, et les invités (quel que
+                    soit leur rôle) ;
+      · écriture  — le propriétaire et les invités « éditeur » ;
+      · propriété — le propriétaire seul : renommer, publier, supprimer l'arbre et
+                    gérer les partages.
+
+    Les ressources filles (individus, familles, événements, médias, styles…)
+    n'ont rien à savoir de tout ça : elles remontent à leur arbre par `tree_path`
+    et héritent de la règle.
+    """
 
     def visible_trees(self):
+        email = self.request.user.email
         return Tree.objects.filter(
-            Q(owner_email=self.request.user.email) | Q(is_public=True)
-        )
+            Q(owner_email=email) | Q(is_public=True) | Q(shares__email=email),
+        ).distinct()
+
+    def editable_trees(self):
+        email = self.request.user.email
+        return Tree.objects.filter(
+            Q(owner_email=email)
+            | Q(shares__email=email, shares__role=TreeShare.Role.EDITOR),
+        ).distinct()
 
     def owned_trees(self):
         return Tree.objects.filter(owner_email=self.request.user.email)
 
     def check_tree(self, tree: Tree) -> None:
+        """Droit d'écrire dans l'arbre : le propriétaire, ou un invité « éditeur »."""
+        if not self.editable_trees().filter(pk=tree.pk).exists():
+            raise PermissionDenied("Vous n’avez pas le droit de modifier cet arbre.")
+
+    def check_owner(self, tree: Tree) -> None:
+        """Droit sur l'arbre lui-même : le partager, le renommer, le supprimer."""
         if tree.owner_email != self.request.user.email:
-            raise PermissionDenied("Cet arbre ne vous appartient pas.")
+            raise PermissionDenied("Seul le propriétaire de l’arbre peut faire cela.")
+
+    def role_on(self, tree: Tree) -> str:
+        if tree.owner_email == self.request.user.email:
+            return 'OWNER'
+        share = tree.shares.filter(email=self.request.user.email).first()
+        return share.role if share else 'VIEWER'
 
 
 class OwnedTreeMixin(TreeOwnerMixin):
@@ -137,7 +172,11 @@ class OwnedTreeMixin(TreeOwnerMixin):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        trees = self.visible_trees() if self.request.method in ('GET', 'HEAD') else self.owned_trees()
+        trees = (
+            self.visible_trees()
+            if self.request.method in ('GET', 'HEAD')
+            else self.editable_trees()
+        )
         qs = qs.filter(**{f'{self.tree_path}__in': trees})
 
         # ?tree=<id> — filtre systématique côté client, l'arbre courant.
@@ -181,8 +220,20 @@ class TreeViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
     queryset = Tree.objects.all()
 
     def get_queryset(self):
-        # Un arbre public est lisible par tous, modifiable par son seul propriétaire.
-        return self.visible_trees() if self.request.method in ('GET', 'HEAD') else self.owned_trees()
+        # L'arbre lui-même (le renommer, le publier, le supprimer) reste au seul
+        # propriétaire. Le contenu, lui, est ouvert aux éditeurs invités — d'où
+        # `editable_trees` pour les actions qui écrivent *dans* l'arbre (réglages
+        # de vue, import GEDCOM…) et non *sur* lui.
+        if self.action in ('update', 'partial_update', 'destroy'):
+            return self.owned_trees()
+        if self.request.method in ('GET', 'HEAD'):
+            return self.visible_trees()
+        return self.editable_trees()
+
+    def get_serializer_context(self):
+        # Le sérialiseur annonce à chacun son rôle sur l'arbre : l'interface s'en
+        # sert pour masquer ce que l'utilisateur n'a pas le droit de faire.
+        return {**super().get_serializer_context(), 'role_of': self.role_on}
 
     def perform_create(self, serializer):
         tree = serializer.save(
@@ -341,6 +392,31 @@ class IndividualViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
         return IndividualSerializer
 
     @extend_schema(
+        summary='Supprimer une personne',
+        description='Sa fiche, ses noms, ses événements, ses médias et ses liens de '
+                    'parenté disparaissent avec elle (cascade). Les personnes qui lui '
+                    'étaient reliées restent dans l’arbre ; seules les familles qu’elle '
+                    'laisse vides sont supprimées.',
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    def perform_destroy(self, instance):
+        # Les familles auxquelles la personne appartenait doivent être relevées
+        # AVANT sa suppression : ses lignes de lien partent en cascade avec elle,
+        # et l'information serait alors perdue.
+        families = list(
+            Family.objects.filter(
+                Q(spouses__individual=instance) | Q(children__individual=instance),
+            ).distinct(),
+        )
+
+        with transaction.atomic():
+            super().perform_destroy(instance)
+            for family in families:
+                prune_family(family)
+
+    @extend_schema(
         summary='Frise chronologique de la vie d’un individu',
         description='Événements personnels, familiaux et naissances des enfants, '
                     'triés, avec le détail complet de chacun (cliquable dans la grande carte).',
@@ -459,16 +535,96 @@ class FamilyViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
             raise ValidationError('Cet individu n’appartient pas à l’arbre.') from exc
 
 
+class TreeShareViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
+    """
+    Partages d'un arbre — visibles et modifiables par son seul propriétaire.
+
+    Inviter quelqu'un déjà invité ne provoque pas d'erreur : cela change son rôle.
+    C'est le geste attendu (« finalement, je lui donne l'édition »), et une
+    contrainte d'unicité renverrait sinon un 400 incompréhensible.
+    """
+
+    queryset = TreeShare.objects.select_related('tree')
+    serializer_class = TreeShareSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset().filter(tree__in=self.owned_trees())
+        if tree_id := self.request.query_params.get('tree'):
+            qs = qs.filter(tree=tree_id)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        tree = serializer.validated_data['tree']
+        self.check_owner(tree)
+
+        email = serializer.validated_data['email']
+        if email == tree.owner_email:
+            raise ValidationError('Cet arbre vous appartient déjà.')
+
+        share, _ = TreeShare.objects.update_or_create(
+            tree=tree,
+            email=email,
+            defaults={
+                'role': serializer.validated_data.get('role', TreeShare.Role.VIEWER),
+                'invited_by': request.user.email,
+            },
+        )
+        return Response(self.get_serializer(share).data, status=status.HTTP_201_CREATED)
+
+    def perform_update(self, serializer):
+        self.check_owner(serializer.instance.tree)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self.check_owner(instance.tree)
+        super().perform_destroy(instance)
+
+
+def prune_family(family: Family | None) -> None:
+    """
+    Supprime la famille qui ne relie plus personne, après le retrait d'un membre.
+
+    En dessous de deux membres, une famille ne porte plus aucun lien : un conjoint
+    resté seul, ou un enfant sans parent, ne relie rien. Deux enfants sans parents,
+    eux, forment bien une fratrie (c'est ce que crée « ajouter un frère ») : le
+    seuil porte donc sur le nombre total de membres, pas sur la présence de
+    conjoints.
+
+    Sans cette purge, retirer le dernier lien laisse dans l'arbre un nœud de
+    jonction flottant, relié à personne — et la famille continue de porter la date
+    de mariage d'une union qui n'existe plus.
+    """
+    if family is None:
+        return
+    if family.spouses.count() + family.children.count() < 2:
+        family.delete()
+
+
 class FamilySpouseViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
     queryset = FamilySpouse.objects.all()
     serializer_class = FamilySpouseSerializer
     tree_path = 'family__tree'
+
+    def perform_destroy(self, instance):
+        family = instance.family
+        with transaction.atomic():
+            super().perform_destroy(instance)
+            prune_family(family)
 
 
 class FamilyChildViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
     queryset = FamilyChild.objects.all()
     serializer_class = FamilyChildSerializer
     tree_path = 'family__tree'
+
+    def perform_destroy(self, instance):
+        family = instance.family
+        with transaction.atomic():
+            super().perform_destroy(instance)
+            prune_family(family)
 
 
 #: Un de ces événements chez une personne signifie qu'elle est décédée.
@@ -595,11 +751,19 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
         if individual_id := request.data.get('individual'):
             individual = Individual.objects.filter(pk=individual_id, tree=tree).first()
             if individual:
-                MediaLink.objects.create(
-                    media=media,
-                    individual=individual,
-                    is_primary=not individual.media_links.filter(is_primary=True).exists(),
-                )
+                # Envoyer une photo depuis la carte, c'est en changer le portrait :
+                # la nouvelle devient primaire et l'ancienne est déclassée. Auparavant
+                # le lien n'était primaire que si la personne n'en avait pas déjà un,
+                # si bien que seule la toute première photo s'affichait : les suivantes
+                # étaient bien enregistrées, mais restaient invisibles.
+                # L'ancienne photo n'est pas supprimée : elle reste dans la galerie.
+                with transaction.atomic():
+                    link = MediaLink.objects.create(
+                        media=media,
+                        individual=individual,
+                        is_primary=True,
+                    )
+                    demote_other_photos(link)
 
         serializer = self.get_serializer(media)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -637,6 +801,40 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
         return response
 
 
+def demote_other_photos(link: MediaLink) -> None:
+    """
+    Un seul portrait par personne : le lien primaire qui arrive chasse l'ancien.
+
+    C'est l'invariant dont dépendent la carte et la fiche, qui lisent le lien
+    primaire — jamais le plus récent. Deux liens primaires et l'affichage devient
+    arbitraire.
+    """
+    if not link.individual_id or not link.is_primary:
+        return
+    MediaLink.objects.filter(
+        individual_id=link.individual_id, is_primary=True,
+    ).exclude(pk=link.pk).update(is_primary=False)
+
+
+def promote_remaining_photo(individual_id: int | None) -> None:
+    """
+    Rend un portrait à la personne qui vient de perdre le sien.
+
+    Sans cela, supprimer la photo affichée laisserait la carte sans portrait alors
+    que la galerie en contient encore : la plus récente des restantes prend le relais.
+    """
+    if not individual_id:
+        return
+
+    links = MediaLink.objects.filter(individual_id=individual_id)
+    if links.filter(is_primary=True).exists():
+        return
+
+    if latest := links.order_by('-id').first():
+        latest.is_primary = True
+        latest.save(update_fields=['is_primary'])
+
+
 class MediaLinkViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
     queryset = MediaLink.objects.select_related('media')
     serializer_class = MediaLinkSerializer
@@ -644,11 +842,25 @@ class MediaLinkViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         link = serializer.save()
-        # Un seul portrait principal par individu.
-        if link.is_primary and link.individual_id:
-            MediaLink.objects.filter(
-                individual_id=link.individual_id, is_primary=True,
-            ).exclude(pk=link.pk).update(is_primary=False)
+        demote_other_photos(link)
+
+    def perform_update(self, serializer):
+        # Choisir une photo de la galerie comme portrait doit déclasser l'ancienne.
+        with transaction.atomic():
+            link = serializer.save()
+            demote_other_photos(link)
+
+    def perform_destroy(self, instance):
+        individual_id = instance.individual_id
+        media = instance.media
+
+        with transaction.atomic():
+            super().perform_destroy(instance)
+            # Les photos sont stockées en binaire dans la base : un média que plus
+            # aucun lien ne réclame n'a pas à continuer d'y occuper de la place.
+            if not media.links.exists():
+                media.delete()
+            promote_remaining_photo(individual_id)
 
 
 class SourceViewSet(OwnedTreeMixin, viewsets.ModelViewSet):

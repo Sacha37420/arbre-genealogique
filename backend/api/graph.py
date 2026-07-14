@@ -292,12 +292,16 @@ def build_graph(tree: Tree) -> dict:
             ),
         })
 
+        # « link » porte l'identifiant de la ligne de lien (FamilySpouse ou
+        # FamilyChild selon le type) : c'est ce qui permet de supprimer un lien
+        # directement depuis l'arbre, sans passer par la fiche.
         for spouse in fam.spouses.all():
             edges.append({
                 'source': f'i{spouse.individual_id}',
                 'target': f'f{fam.pk}',
                 'kind': 'SPOUSE',
                 'role': spouse.role,
+                'link': spouse.pk,
             })
         for child in fam.children.all():
             edges.append({
@@ -305,6 +309,7 @@ def build_graph(tree: Tree) -> dict:
                 'target': f'i{child.individual_id}',
                 'kind': 'ADOPTED' if child.pedigree != Pedigree.BIRTH else 'PARENT_CHILD',
                 'pedigree': child.pedigree,
+                'link': child.pk,
             })
 
     edge_styles = {

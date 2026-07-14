@@ -19,53 +19,131 @@
     </div>
 
     @if (store.currentId() !== null) {
-      <div class="group grow">
-        <input
-          class="input"
-          placeholder="Ajouter une personne (Prénom Nom)"
-          [ngModel]="newPersonName()"
-          (ngModelChange)="newPersonName.set($event)"
-          (keyup.enter)="addPerson()"
-        />
-        <button type="button" class="btn primary" (click)="addPerson()" [disabled]="!newPersonName().trim()">
-          Ajouter
-        </button>
-      </div>
+      @if (canEdit()) {
+        <div class="group grow">
+          <input
+            class="input"
+            placeholder="Ajouter une personne (Prénom Nom)"
+            [ngModel]="newPersonName()"
+            (ngModelChange)="newPersonName.set($event)"
+            (keyup.enter)="addPerson()"
+          />
+          <button type="button" class="btn primary" (click)="addPerson()" [disabled]="!newPersonName().trim()">
+            Ajouter
+          </button>
+        </div>
+      } @else {
+        <div class="group grow">
+          <span class="badge-role" title="Cet arbre vous a été partagé en lecture seule">
+            Lecture seule — arbre de {{ store.current()?.owner_email }}
+          </span>
+        </div>
+      }
 
       <div class="group">
-        <button type="button" class="btn ghost" (click)="autoLayout()" title="Replacer automatiquement toutes les cartes">
-          Réorganiser
-        </button>
+        @if (canEdit()) {
+          <button type="button" class="btn ghost" (click)="autoLayout()" title="Replacer automatiquement toutes les cartes">
+            Réorganiser
+          </button>
+        }
         <button type="button" class="btn ghost" (click)="resetView()">Recentrer</button>
 
-        <button
-          type="button"
-          class="btn ghost toggle"
-          [class.on]="graph()?.settings?.snap_to_grid"
-          (click)="toggleSetting('snap_to_grid')"
-          title="Aimanter aussi sur la grille horizontalement. Une carte n'est attirée par une ligne que si elle en passe près ; plus loin, elle reste libre et crée une nouvelle rangée. Maj = aucune aimantation."
-        >
-          Aimanter
-        </button>
-        <button
-          type="button"
-          class="btn ghost toggle"
-          [class.on]="graph()?.settings?.show_grid"
-          (click)="toggleSetting('show_grid')"
-          title="Afficher la grille"
-        >
-          Grille
-        </button>
+        @if (canEdit()) {
+          <button
+            type="button"
+            class="btn ghost toggle"
+            [class.on]="graph()?.settings?.snap_to_grid"
+            (click)="toggleSetting('snap_to_grid')"
+            title="Aimanter aussi sur la grille horizontalement. Une carte n'est attirée par une ligne que si elle en passe près ; plus loin, elle reste libre et crée une nouvelle rangée. Maj = aucune aimantation."
+          >
+            Aimanter
+          </button>
+          <button
+            type="button"
+            class="btn ghost toggle"
+            [class.on]="graph()?.settings?.show_grid"
+            (click)="toggleSetting('show_grid')"
+            title="Afficher la grille"
+          >
+            Grille
+          </button>
 
-        <label class="btn ghost file">
-          Importer GEDCOM
-          <input type="file" accept=".ged,.gedcom,text/plain" (change)="importGedcom($event)" hidden />
-        </label>
+          <label class="btn ghost file">
+            Importer GEDCOM
+            <input type="file" accept=".ged,.gedcom,text/plain" (change)="importGedcom($event)" hidden />
+          </label>
+        }
+
         <button type="button" class="btn ghost" (click)="exportGedcom()">Exporter GEDCOM</button>
-        <button type="button" class="btn ghost" (click)="goEnrich()">Enrichir</button>
+
+        @if (canEdit()) {
+          <button type="button" class="btn ghost" (click)="goEnrich()">Enrichir</button>
+        }
+        @if (isOwner()) {
+          <button
+            type="button"
+            class="btn ghost toggle"
+            [class.on]="sharing()"
+            (click)="toggleSharing()"
+            title="Donner accès à cet arbre à d’autres personnes"
+          >
+            Partager{{ store.current()?.shared_with_count ? ' (' + store.current()?.shared_with_count + ')' : '' }}
+          </button>
+        }
       </div>
     }
   </header>
+
+  @if (sharing() && isOwner()) {
+    <section class="share-panel">
+      <h3>Partager « {{ store.current()?.name }} »</h3>
+      <p class="muted">
+        L’invité n’a pas besoin d’avoir déjà un compte : l’arbre apparaîtra chez lui à sa
+        première connexion avec cette adresse.
+      </p>
+
+      <form class="share-form" (ngSubmit)="invite()">
+        <input
+          class="input"
+          type="email"
+          placeholder="adresse@exemple.fr"
+          [ngModel]="shareEmail()"
+          (ngModelChange)="shareEmail.set($event)"
+          name="shareEmail"
+          required
+        />
+        <select class="select" [ngModel]="shareRole()" (ngModelChange)="shareRole.set($event)" name="shareRole">
+          <option value="VIEWER">Lecture</option>
+          <option value="EDITOR">Édition</option>
+        </select>
+        <button type="submit" class="btn primary" [disabled]="!shareEmail().trim()">Inviter</button>
+      </form>
+
+      @if (shares().length) {
+        <ul class="share-list">
+          @for (share of shares(); track share.id) {
+            <li>
+              <span class="who">{{ share.email }}</span>
+              <select
+                class="select small"
+                [ngModel]="share.role"
+                (ngModelChange)="changeRole(share, $event)"
+                [name]="'role' + share.id"
+              >
+                <option value="VIEWER">Lecture</option>
+                <option value="EDITOR">Édition</option>
+              </select>
+              <button type="button" class="icon danger" (click)="revoke(share)" aria-label="Retirer l’accès">
+                ×
+              </button>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="muted small">Cet arbre n’est partagé avec personne pour l’instant.</p>
+      }
+    </section>
+  }
 
   @if (busy()) {
     <p class="banner info">{{ busy() }}</p>
@@ -130,16 +208,32 @@
             aria-hidden="true"
           >
             @for (edge of edges(); track edge.id) {
-              <path
-                [attr.d]="edge.path"
-                [attr.stroke]="edge.style.color"
-                [attr.stroke-width]="edge.style.width"
-                [attr.stroke-dasharray]="dashArray(edge.style)"
-                [attr.opacity]="edge.style.opacity"
-                fill="none"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
+              <g class="edge">
+                <path
+                  [attr.d]="edge.path"
+                  [attr.stroke]="edge.style.color"
+                  [attr.stroke-width]="edge.style.width"
+                  [attr.stroke-dasharray]="dashArray(edge.style)"
+                  [attr.opacity]="edge.style.opacity"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <!--
+                  Trait de préhension : invisible et large, parce qu'un lien de 2 px
+                  est trop fin pour être visé. C'est lui qui reçoit le clic.
+                  pointerdown est stoppé ici, sinon le geste démarrerait un
+                  panoramique du canevas et le clic suivrait un déplacement.
+                -->
+                <path
+                  class="hit"
+                  [attr.d]="edge.path"
+                  (pointerdown)="$event.stopPropagation()"
+                  (click)="removeEdge(edge)"
+                >
+                  <title>Supprimer ce lien</title>
+                </path>
+              </g>
             }
           </svg>
 
@@ -189,12 +283,15 @@
           (closed)="editing.set(false)"
           (saved)="onEdited()"
           (relationsChanged)="refreshGraph()"
+          (photosChanged)="refreshGraph()"
+          (removed)="onRemoved()"
         />
       } @else {
         <app-full-card
           [card]="card"
           [template]="graph()?.full_template ?? null"
           [timeline]="timeline()"
+          [canEdit]="canEdit()"
           (closed)="closeCard()"
           (openRelated)="openRelated($event)"
           (enrich)="goEnrich($event)"

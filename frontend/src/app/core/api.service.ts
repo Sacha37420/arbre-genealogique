@@ -15,6 +15,7 @@ import {
   Timeline,
   Tree,
   TreeGraph,
+  TreeShare,
   TreeViewSettings,
 } from './models';
 
@@ -51,6 +52,28 @@ export class ApiService {
 
   createTree(payload: Partial<Tree>): Observable<Tree> {
     return this.http.post<Tree>(`${this.base}/api/trees/`, payload);
+  }
+
+  // ── Partage ───────────────────────────────────────────────────────────────
+  getShares(treeId: number): Observable<TreeShare[]> {
+    return this.list<TreeShare>(`${this.base}/api/tree-shares/?tree=${treeId}`);
+  }
+
+  /** Inviter quelqu'un déjà invité change son rôle : le serveur fait un upsert. */
+  addShare(treeId: number, email: string, role: TreeShare['role']): Observable<TreeShare> {
+    return this.http.post<TreeShare>(`${this.base}/api/tree-shares/`, {
+      tree: treeId,
+      email,
+      role,
+    });
+  }
+
+  updateShare(shareId: number, role: TreeShare['role']): Observable<TreeShare> {
+    return this.http.patch<TreeShare>(`${this.base}/api/tree-shares/${shareId}/`, { role });
+  }
+
+  removeShare(shareId: number): Observable<unknown> {
+    return this.http.delete(`${this.base}/api/tree-shares/${shareId}/`);
   }
 
   getGraph(treeId: number): Observable<TreeGraph> {
@@ -206,6 +229,16 @@ export class ApiService {
     form.append('tree', String(treeId));
     form.append('individual', String(individualId));
     return this.http.post(`${this.base}/api/media/`, form);
+  }
+
+  /** Désigne une photo de la galerie comme portrait. Le serveur déclasse l'ancienne. */
+  setPrimaryPhoto(linkId: number): Observable<unknown> {
+    return this.http.patch(`${this.base}/api/media-links/${linkId}/`, { is_primary: true });
+  }
+
+  /** Retire une photo de la personne (et le média lui-même s'il ne sert plus ailleurs). */
+  removePhoto(linkId: number): Observable<unknown> {
+    return this.http.delete(`${this.base}/api/media-links/${linkId}/`);
   }
 
   // ── Gabarits de cartes ────────────────────────────────────────────────────

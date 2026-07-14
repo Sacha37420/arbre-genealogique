@@ -70,13 +70,17 @@ import { TimelineComponent } from './timeline.component';
       }
 
       <footer>
-        <button type="button" class="btn primary" (click)="edit.emit(card())">Modifier</button>
-        <button type="button" class="btn ghost" (click)="addPhoto.emit(card())">
-          {{ card().has_photo ? 'Changer la photo' : 'Ajouter une photo' }}
-        </button>
-        <button type="button" class="btn ghost" (click)="enrich.emit(card())">
-          Compléter depuis une source externe
-        </button>
+        @if (canEdit()) {
+          <button type="button" class="btn primary" (click)="edit.emit(card())">Modifier</button>
+          <button type="button" class="btn ghost" (click)="addPhoto.emit(card())">
+            {{ card().has_photo ? 'Changer la photo' : 'Ajouter une photo' }}
+          </button>
+          <button type="button" class="btn ghost" (click)="enrich.emit(card())">
+            Compléter depuis une source externe
+          </button>
+        } @else {
+          <p class="loading">Arbre partagé en lecture seule.</p>
+        }
       </footer>
     </article>
   `,
@@ -87,6 +91,8 @@ export class FullCardComponent {
   readonly card = input.required<PersonCard>();
   readonly template = input<CardTemplate | null>(null);
   readonly timeline = input<Timeline | null>(null);
+  /** Faux sur un arbre partagé en lecture : la fiche se consulte, ne se modifie pas. */
+  readonly canEdit = input(true);
 
   readonly closed = output<void>();
   readonly openRelated = output<number>();

@@ -250,6 +250,40 @@ class Tree(models.Model):
         return self.name
 
 
+class TreeShare(models.Model):
+    """
+    Accès donné à quelqu'un d'autre sur un arbre, désigné par son e-mail.
+
+    L'invitation ne suppose pas que la personne se soit déjà connectée : c'est
+    l'adresse qui est stockée, et l'accès s'ouvre à sa première connexion
+    Keycloak — l'e-mail est le pivot d'identité de toute l'application
+    (cf. UserRecord.email, alimenté depuis le JWT).
+
+    Le propriétaire de l'arbre n'apparaît pas ici : sa qualité vient de
+    Tree.owner_email, et lui seul gère les partages et peut supprimer l'arbre.
+    """
+
+    class Role(models.TextChoices):
+        VIEWER = 'VIEWER', 'Lecture'
+        EDITOR = 'EDITOR', 'Édition'
+
+    tree = models.ForeignKey(Tree, on_delete=models.CASCADE, related_name='shares')
+    email = models.EmailField(max_length=255, db_index=True)
+    role = models.CharField(max_length=6, choices=Role.choices, default=Role.VIEWER)
+    invited_by = models.EmailField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tree_shares'
+        ordering = ['email']
+        constraints = [
+            models.UniqueConstraint(fields=['tree', 'email'], name='uniq_share_per_tree'),
+        ]
+
+    def __str__(self) -> str:
+        return f'{self.email} → {self.tree} ({self.role})'
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Lieux (PLAC) — géocodables pour la carte et la frise
 # ─────────────────────────────────────────────────────────────────────────────

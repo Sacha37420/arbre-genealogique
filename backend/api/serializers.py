@@ -29,6 +29,7 @@ from .models import (
     Source,
     StyleRule,
     Tree,
+    TreeShare,
     TreeViewSettings,
     UserRecord,
 )
@@ -40,18 +41,45 @@ class UserRecordSerializer(serializers.ModelSerializer):
         fields = ['email', 'display_name', 'registered_at']
 
 
+class TreeShareSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TreeShare
+        fields = ['id', 'tree', 'email', 'role', 'invited_by', 'created_at']
+        read_only_fields = ['invited_by', 'created_at']
+        # DRF déduirait de la contrainte d'unicité (arbre, e-mail) un validateur qui
+        # refuserait une seconde invitation de la même personne. Or ce geste-là veut
+        # dire « change son rôle » : la vue le traite en upsert, et validerait ici un
+        # 400 incompréhensible avant même d'y arriver.
+        validators = []
+
+    def validate_email(self, value: str) -> str:
+        # L'e-mail est la clé d'identité (elle vient du JWT) : une casse ou une
+        # espace de trop et l'invité ne retrouverait jamais l'arbre partagé.
+        return value.strip().lower()
+
+
 class TreeSerializer(serializers.ModelSerializer):
     individual_count = serializers.IntegerField(source='individuals.count', read_only=True)
     family_count = serializers.IntegerField(source='families.count', read_only=True)
+    #: Rôle de celui qui regarde : OWNER, EDITOR ou VIEWER. L'interface s'en sert
+    #: pour ne proposer que ce qu'il a le droit de faire.
+    my_role = serializers.SerializerMethodField()
+    shared_with_count = serializers.IntegerField(source='shares.count', read_only=True)
 
     class Meta:
         model = Tree
         fields = [
             'id', 'name', 'description', 'owner_email', 'is_public', 'gedcom_version',
             'source_software', 'submitter_name', 'copyright', 'language', 'note',
-            'individual_count', 'family_count', 'created_at', 'updated_at',
+            'individual_count', 'family_count', 'my_role', 'shared_with_count',
+            'created_at', 'updated_at',
         ]
         read_only_fields = ['owner_email', 'created_at', 'updated_at']
+
+    def get_my_role(self, obj: Tree) -> str:
+        if role_of := self.context.get('role_of'):
+            return role_of(obj)
+        return 'VIEWER'
 
 
 class PlaceSerializer(serializers.ModelSerializer):

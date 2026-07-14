@@ -2,6 +2,9 @@
 
 export type Sex = 'M' | 'F' | 'X' | 'U';
 
+/** Ce que l'utilisateur courant a le droit de faire sur un arbre. */
+export type TreeRole = 'OWNER' | 'EDITOR' | 'VIEWER';
+
 export interface Tree {
   id: number;
   name: string;
@@ -10,8 +13,21 @@ export interface Tree {
   is_public: boolean;
   individual_count: number;
   family_count: number;
+  /** Rôle de celui qui regarde — calculé par le serveur, jamais envoyé par le client. */
+  my_role: TreeRole;
+  shared_with_count: number;
   created_at: string;
   updated_at: string;
+}
+
+/** Accès donné à quelqu'un d'autre sur un arbre, par son adresse e-mail. */
+export interface TreeShare {
+  id: number;
+  tree: number;
+  email: string;
+  role: 'VIEWER' | 'EDITOR';
+  invited_by: string;
+  created_at: string;
 }
 
 /** Style résolu d'une carte : le serveur a déjà appliqué les règles conditionnelles. */
@@ -88,6 +104,8 @@ export interface Edge {
   kind: 'PARENT_CHILD' | 'SPOUSE' | 'ADOPTED' | 'ASSOCIATION';
   role?: string;
   pedigree?: string;
+  /** Identifiant du lien : FamilySpouse si kind = SPOUSE, FamilyChild sinon. */
+  link: number;
 }
 
 export interface EdgeStyleSpec {
@@ -380,6 +398,16 @@ export interface PersonalName {
   is_primary: boolean;
 }
 
+/** Une photo rattachée à une personne. La primaire est le portrait affiché sur les cartes. */
+export interface MediaLink {
+  id: number;
+  media: number;
+  individual: number | null;
+  is_primary: boolean;
+  file_url: string;
+  title: string;
+}
+
 /** Fiche complète d'un individu (GET /api/individuals/<id>/). */
 export interface IndividualDetail {
   id: number;
@@ -399,6 +427,8 @@ export interface IndividualDetail {
   birth_date: string;
   death_date: string;
   photo_url: string | null;
+  /** Toutes les photos de la personne : la galerie où l'on choisit le portrait. */
+  media_links: MediaLink[];
   /** Familles où la personne est conjoint : leurs mariages/divorces sont éditables ici. */
   spouse_families: number[];
 }

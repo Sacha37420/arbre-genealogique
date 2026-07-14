@@ -165,12 +165,97 @@
   will-change: transform;
 }
 
+/* ── Partage ─────────────────────────────────────────────────────────────── */
+.share-panel {
+  margin: 0 16px 12px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #e3e7ec;
+  border-radius: 10px;
+
+  h3 {
+    margin: 0 0 4px;
+    font-size: 0.95rem;
+  }
+
+  .muted {
+    margin: 0 0 12px;
+    color: #6b7784;
+    font-size: 0.8rem;
+
+    &.small {
+      margin: 0;
+    }
+  }
+}
+
+.share-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+
+  .input {
+    flex: 1;
+    min-width: 220px;
+  }
+}
+
+.share-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 0;
+    border-top: 1px solid #f0f2f5;
+  }
+
+  .who {
+    flex: 1;
+    font-size: 0.85rem;
+  }
+}
+
+/* Le lecteur doit comprendre pourquoi il ne peut rien faire : sans ce repère,
+   l'absence des boutons d'édition passe pour un bug. */
+.badge-role {
+  font-size: 0.8rem;
+  color: #6b7784;
+  background: #f1f4f7;
+  border: 1px solid #e3e7ec;
+  border-radius: 999px;
+  padding: 5px 12px;
+}
+
 .edges {
   position: absolute;
   top: 0;
   left: 0;
+  // Le calque des liens couvre tout le canevas : sans ça, il intercepterait le
+  // panoramique. Seul le trait de préhension réactive le pointeur.
   pointer-events: none;
   overflow: visible;
+}
+
+.edge {
+  .hit {
+    fill: none;
+    stroke: transparent;
+    stroke-width: 14; // zone de clic confortable autour d'un trait de 2 px
+    pointer-events: stroke;
+    cursor: pointer;
+  }
+
+  // Le lien s'épaissit et rougit au survol : il devient visiblement cliquable,
+  // et l'on voit lequel des traits qui se croisent est visé.
+  &:hover path:first-child {
+    stroke: #d64b3a;
+    stroke-width: 3;
+  }
 }
 
 .grid {

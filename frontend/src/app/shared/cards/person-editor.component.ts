@@ -8,6 +8,7 @@ import {
   EventRecord,
   EventType,
   IndividualDetail,
+  MediaLink,
   PEDIGREE_TYPES,
   PersonCard,
   Relations,
@@ -79,11 +80,17 @@ export class PersonEditorComponent {
   readonly saved = output<void>();
   /** Une relation a changé : l'arbre doit être redessiné, sans fermer l'éditeur. */
   readonly relationsChanged = output<void>();
+  /** La personne n'existe plus : la fiche doit se fermer, pas seulement se recharger. */
+  readonly removed = output<void>();
+  /** Le portrait a changé : la carte de l'arbre doit être redessinée. */
+  readonly photosChanged = output<void>();
 
   readonly detail = signal<IndividualDetail | null>(null);
   readonly relations = signal<Relations | null>(null);
   readonly events = signal<DraftEvent[]>([]);
   readonly eventTypes = signal<EventType[]>([]);
+  /** Galerie de la personne : c'est ici qu'on désigne le portrait. */
+  readonly photos = signal<MediaLink[]>([]);
 
   readonly loading = signal(false);
   readonly saving = signal(false);
@@ -177,6 +184,7 @@ export class PersonEditorComponent {
       next: ({ detail, relations }) => {
         this.detail.set(detail);
         this.relations.set(relations);
+        this.photos.set(detail.media_links ?? []);
 
         this.givn.set(detail.given_name);
         this.surn.set(detail.surname);
@@ -238,6 +246,82 @@ export class PersonEditorComponent {
     this.identityDirty.set(true);
   }
 
+  // ── Photos ────────────────────────────────────────────────────────────────
+  photoSrc(link: MediaLink): string {
+    return this.api.mediaUrl(link.file_url);
+  }
+
+  /** Désigne cette photo comme portrait. Le serveur déclasse l'ancienne. */
+  choosePhoto(link: MediaLink): void {
+    if (link.is_primary) return;
+
+    this.busy.set('Changement du portrait…');
+    this.error.set('');
+    this.api.setPrimaryPhoto(link.id).subscribe({
+      next: () => this.reloadPhotos(),
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  deletePhoto(link: MediaLink): void {
+    if (!confirm('Supprimer cette photo ?')) return;
+
+    this.busy.set('Suppression de la photo…');
+    this.error.set('');
+    this.api.removePhoto(link.id).subscribe({
+      next: () => this.reloadPhotos(),
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  addPhoto(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    const treeId = this.detail()?.tree;
+    if (!file || treeId === undefined) return;
+
+    this.busy.set('Envoi de la photo…');
+    this.error.set('');
+    this.api.uploadPhoto(treeId, this.individualId(), file).subscribe({
+      next: () => {
+        input.value = '';
+        this.reloadPhotos();
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  /**
+   * Relit la seule galerie, et non toute la fiche.
+   *
+   * Les gestes sur les photos partent immédiatement, comme les relations — mais
+   * recharger la fiche entière rejouerait `load()` et effacerait au passage les
+   * modifications d'identité et d'événements pas encore enregistrées.
+   */
+  private reloadPhotos(): void {
+    this.api.getIndividual(this.individualId()).subscribe({
+      next: (detail) => {
+        this.photos.set(detail.media_links ?? []);
+        this.busy.set('');
+        // Le portrait figure sur la carte de l'arbre : elle doit être redessinée.
+        this.photosChanged.emit();
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
   // ── Relations ─────────────────────────────────────────────────────────────
   openAdd(relation: Relation): void {
     this.adding.set(this.adding() === relation ? null : relation);
@@ -270,6 +354,38 @@ export class PersonEditorComponent {
       next: () => {
         this.adding.set(null);
         this.reloadRelations();
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  /**
+   * Supprime la personne elle-même.
+   *
+   * Les liens qu'elle portait disparaissent avec elle, mais pas les personnes au
+   * bout de ces liens : le serveur ne retire que les familles qu'elle laisse
+   * vides. Le geste est irréversible et l'arbre n'a pas d'historique : d'où la
+   * confirmation, qui énonce ce qui part.
+   */
+  deletePerson(): void {
+    const name = [this.givn(), this.surn()].filter(Boolean).join(' ') || 'cette personne';
+    const confirmed = confirm(
+      `Supprimer définitivement ${name} ?\n\n` +
+        'Sa fiche, ses événements et ses liens de parenté seront supprimés. ' +
+        'Les personnes qui lui sont reliées restent dans l’arbre.',
+    );
+    if (!confirmed) return;
+
+    this.busy.set('Suppression…');
+    this.error.set('');
+
+    this.api.deleteIndividual(this.individualId()).subscribe({
+      next: () => {
+        this.busy.set('');
+        this.removed.emit();
       },
       error: (err) => {
         this.busy.set('');

@@ -29,6 +29,7 @@ from .views import (
     SharedNoteViewSet,
     SourceViewSet,
     StyleRuleViewSet,
+    TreeShareViewSet,
     TreeViewSet,
 )
 
@@ -36,6 +37,7 @@ router = DefaultRouter()
 
 # ── Données généalogiques ────────────────────────────────────────────────────
 router.register('trees', TreeViewSet)
+router.register('tree-shares', TreeShareViewSet)
 router.register('individuals', IndividualViewSet)
 router.register('names', PersonalNameViewSet)
 router.register('families', FamilyViewSet)

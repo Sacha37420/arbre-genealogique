@@ -371,6 +371,81 @@ h4 {
   }
 }
 
+/* ── Galerie de photos ───────────────────────────────────────────────────── */
+.gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.shot {
+  position: relative;
+  margin: 0;
+
+  .pick {
+    display: block;
+    padding: 0;
+    border: 2px solid #e3e7ec;
+    border-radius: 10px;
+    background: none;
+    cursor: pointer;
+    overflow: hidden;
+    line-height: 0;
+
+    &:hover {
+      border-color: #9db4cd;
+    }
+  }
+
+  img {
+    width: 84px;
+    height: 84px;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* Le portrait courant se distingue au premier coup d'œil : sans repère, on ne
+     sait pas laquelle des photos est celle que porte la carte. */
+  &.primary .pick {
+    border-color: #1976d2;
+    cursor: default;
+  }
+
+  .badge {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(25, 118, 210, 0.92);
+    color: #fff;
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 2px 0;
+    line-height: 1.4;
+  }
+
+  .remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: #fff;
+    border: 1px solid #e3e7ec;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    line-height: 1;
+  }
+}
+
+.btn.file {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
 .banner.error {
   background: #fdecea;
   color: #a52717;
@@ -382,11 +457,16 @@ h4 {
 
 footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   margin-top: 18px;
   padding-top: 14px;
   border-top: 1px solid #eef1f4;
+}
+
+/* Éloigne la suppression des boutons de validation : on ne la clique pas par ricochet. */
+.spacer {
+  flex: 1;
 }
 
 .btn {
@@ -410,6 +490,16 @@ footer {
 
     &:hover:not(:disabled) {
       background: #1565c0;
+    }
+  }
+
+  &.danger {
+    border-color: #f0cdc7;
+    color: #a52717;
+
+    &:hover:not(:disabled) {
+      background: #fdecea;
+      border-color: #e3a99f;
     }
   }
 

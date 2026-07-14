@@ -61,6 +61,53 @@
       </label>
     </section>
 
+    <!-- ── Photos ────────────────────────────────────────────────────────── -->
+    <section>
+      <div class="section-head">
+        <h3>Photos</h3>
+        <label class="btn tiny file">
+          Ajouter une photo
+          <input type="file" accept="image/*" hidden (change)="addPhoto($event)" />
+        </label>
+      </div>
+
+      @if (photos().length) {
+        <p class="muted small">
+          Cliquez sur une photo pour en faire le portrait affiché sur la carte.
+        </p>
+        <div class="gallery">
+          @for (photo of photos(); track photo.id) {
+            <figure class="shot" [class.primary]="photo.is_primary">
+              <button
+                type="button"
+                class="pick"
+                [attr.aria-pressed]="photo.is_primary"
+                [title]="photo.is_primary ? 'Portrait actuel' : 'Faire de cette photo le portrait'"
+                (click)="choosePhoto(photo)"
+              >
+                <img [src]="photoSrc(photo)" [alt]="photo.title || 'Photo'" />
+                @if (photo.is_primary) {
+                  <span class="badge">Portrait</span>
+                }
+              </button>
+              <button
+                type="button"
+                class="icon danger remove"
+                (click)="deletePhoto(photo)"
+                aria-label="Supprimer cette photo"
+              >
+                ×
+              </button>
+            </figure>
+          }
+        </div>
+      } @else {
+        <p class="muted small">
+          Aucune photo pour l’instant. La première envoyée devient le portrait.
+        </p>
+      }
+    </section>
+
     <!-- ── Relations ─────────────────────────────────────────────────────── -->
     @if (relations(); as rel) {
       <section>
@@ -412,6 +459,10 @@
     </section>
 
     <footer>
+      <button type="button" class="btn danger" (click)="deletePerson()" [disabled]="saving()">
+        Supprimer la personne
+      </button>
+      <span class="spacer"></span>
       <button type="button" class="btn" (click)="closed.emit()">Fermer</button>
       <button type="button" class="btn primary" (click)="save()" [disabled]="saving() || !dirty()">
         {{ saving() ? 'Enregistrement…' : 'Enregistrer' }}

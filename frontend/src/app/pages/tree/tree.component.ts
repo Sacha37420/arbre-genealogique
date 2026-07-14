@@ -13,7 +13,15 @@ import {
   isHorizontal,
   snapPosition,
 } from '../../core/layout';
-import { Edge, EdgeStyleSpec, FamilyNode, PersonCard, Timeline, TreeGraph } from '../../core/models';
+import {
+  Edge,
+  EdgeStyleSpec,
+  FamilyNode,
+  PersonCard,
+  Timeline,
+  TreeGraph,
+  TreeShare,
+} from '../../core/models';
 import { TreeStore, describeError } from '../../core/tree-store';
 import { FullCardComponent } from '../../shared/cards/full-card.component';
 import { MiniCardComponent } from '../../shared/cards/mini-card.component';
@@ -23,6 +31,8 @@ interface RenderedEdge {
   id: string;
   path: string;
   style: EdgeStyleSpec;
+  /** Le lien sous-jacent, pour pouvoir le supprimer d'un clic sur le trait. */
+  edge: Edge;
 }
 
 /** En deçà de ce déplacement (en pixels écran), le geste est un clic, pas un glissement. */
@@ -81,6 +91,22 @@ export class TreeComponent {
 
   readonly newPersonName = signal('');
   readonly busy = signal('');
+
+  // ── Partage ───────────────────────────────────────────────────────────────
+  /**
+   * Rôle de l'utilisateur sur l'arbre courant, calculé par le serveur.
+   *
+   * L'interface s'en sert pour ne montrer que ce qui est permis. Ce n'est
+   * qu'un confort : l'autorisation elle-même est tenue côté serveur, où toutes
+   * les écritures repassent par `check_tree`.
+   */
+  readonly canEdit = computed(() => this.store.current()?.my_role !== 'VIEWER');
+  readonly isOwner = computed(() => this.store.current()?.my_role === 'OWNER');
+
+  readonly sharing = signal(false);
+  readonly shares = signal<TreeShare[]>([]);
+  readonly shareEmail = signal('');
+  readonly shareRole = signal<TreeShare['role']>('VIEWER');
 
   constructor() {
     this.store.load();
@@ -170,9 +196,61 @@ export class TreeComponent {
         id: `${edge.source}->${edge.target}`,
         path: edgePath(from, to, style.curve, orientation),
         style,
+        edge,
       };
     });
   });
+
+  /** Nom de la personne au bout d'un lien — l'autre extrémité est la famille. */
+  private personOn(edge: Edge): string {
+    const key = edge.kind === 'SPOUSE' ? edge.source : edge.target;
+    const id = Number(key.slice(1));
+    const card = this.graph()?.nodes.find((n) => n.id === id);
+    return card?.full_name || 'cette personne';
+  }
+
+  /**
+   * Supprime un lien d'un clic sur le trait qui le porte.
+   *
+   * Le lien est le seul objet supprimé : les deux personnes restent dans l'arbre.
+   * Le serveur se charge d'effacer la famille que le lien laisse éventuellement
+   * vide, pour ne pas abandonner un nœud de jonction relié à personne.
+   */
+  removeEdge(rendered: RenderedEdge): void {
+    if (!this.canEdit()) return;
+
+    const edge = rendered.edge;
+    const who = this.personOn(edge);
+
+    const question =
+      edge.kind === 'SPOUSE'
+        ? `Retirer ${who} de cette union ?`
+        : `Détacher ${who} de ses parents ?`;
+    if (!confirm(`${question}\n\nSeul le lien est supprimé : la personne reste dans l’arbre.`)) return;
+
+    const call =
+      edge.kind === 'SPOUSE'
+        ? this.api.removeSpouseLink(edge.link)
+        : this.api.removeChildLink(edge.link);
+
+    this.busy.set('Suppression du lien…');
+    call.subscribe({
+      next: () => {
+        this.busy.set('');
+        this.refreshGraph();
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  /** La personne supprimée : sa fiche n'a plus d'objet, l'arbre doit être relu. */
+  onRemoved(): void {
+    this.closeCard();
+    this.reload();
+  }
 
   dashArray(style: EdgeStyleSpec): string {
     if (style.dash === 'dashed') return '7 5';
@@ -209,6 +287,9 @@ export class TreeComponent {
 
   onNodePointerDown(event: PointerEvent, key: string): void {
     if (event.button !== 0) return;
+    // Déplacer une carte, c'est écrire (la position est épinglée en base) : sur un
+    // arbre partagé en lecture, la carte ne bouge pas. Le clic, lui, ouvre la fiche.
+    if (!this.canEdit()) return;
     event.stopPropagation();
 
     const origin = this.positionOf(key);
@@ -525,6 +606,70 @@ export class TreeComponent {
   createTree(): void {
     const name = prompt('Nom du nouvel arbre :');
     if (name?.trim()) this.store.create(name.trim());
+  }
+
+  // ── Partage ───────────────────────────────────────────────────────────────
+  toggleSharing(): void {
+    const open = !this.sharing();
+    this.sharing.set(open);
+    if (open) this.loadShares();
+  }
+
+  private loadShares(): void {
+    const treeId = this.store.currentId();
+    if (treeId === null) return;
+
+    this.api.getShares(treeId).subscribe({
+      next: (shares) => this.shares.set(shares),
+      error: (err) => this.error.set(describeError(err)),
+    });
+  }
+
+  /**
+   * Invite quelqu'un par son adresse e-mail.
+   *
+   * L'invité n'a pas besoin d'exister : c'est l'adresse qui est enregistrée, et
+   * l'arbre apparaîtra chez lui dès sa première connexion avec cette adresse.
+   */
+  invite(): void {
+    const treeId = this.store.currentId();
+    const email = this.shareEmail().trim();
+    if (treeId === null || !email) return;
+
+    this.busy.set('Invitation…');
+    this.error.set('');
+
+    this.api.addShare(treeId, email, this.shareRole()).subscribe({
+      next: () => {
+        this.shareEmail.set('');
+        this.busy.set('');
+        this.loadShares();
+        this.store.load(); // le compteur de partages de l'arbre a changé
+      },
+      error: (err) => {
+        this.busy.set('');
+        this.error.set(describeError(err));
+      },
+    });
+  }
+
+  changeRole(share: TreeShare, role: TreeShare['role']): void {
+    this.api.updateShare(share.id, role).subscribe({
+      next: () => this.loadShares(),
+      error: (err) => this.error.set(describeError(err)),
+    });
+  }
+
+  revoke(share: TreeShare): void {
+    if (!confirm(`Retirer l’accès de ${share.email} à cet arbre ?`)) return;
+
+    this.api.removeShare(share.id).subscribe({
+      next: () => {
+        this.loadShares();
+        this.store.load();
+      },
+      error: (err) => this.error.set(describeError(err)),
+    });
   }
 
   goEnrich(card?: PersonCard): void {
