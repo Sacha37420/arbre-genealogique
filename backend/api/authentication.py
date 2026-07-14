@@ -64,6 +64,30 @@ class KeycloakJWTAuthentication(BaseAuthentication):
             )
         except InvalidTokenError as exc:
             raise AuthenticationFailed(f'Token invalide : {exc}') from exc
+        # Le token doit avoir été émis POUR cette application.
+        # Sans ce contrôle, n'importe quel token du realm est accepté : le realm
+        # expose 'admin-cli' en client public autorisant le password grant, donc
+        # tout compte — y compris un compte auto-inscrit — pourrait s'en servir
+        # pour appeler cette API. On vérifie 'azp' plutôt que 'aud' car Keycloak
+        # ne place pas le clientId dans 'aud' sans mapper d'audience dédié.
+        if claims.get('azp') != settings.KEYCLOAK_CLIENT_ID:
+            raise AuthenticationFailed(
+                "Ce token a été émis pour un autre client que "
+                f"'{settings.KEYCLOAK_CLIENT_ID}'."
+            )
+
+        # Cloisonnement par groupe. KEYCLOAK_REQUIRED_GROUPS vide ⇒ aucun filtre :
+        # toute personne authentifiée sur ce client passe.
+        required = {
+            g.strip()
+            for g in settings.KEYCLOAK_REQUIRED_GROUPS.split(',')
+            if g.strip()
+        }
+        if required and not required & set(claims.get('groups') or []):
+            raise AuthenticationFailed(
+                'Accès réservé aux membres du/des groupe(s) : '
+                f"{', '.join(sorted(required))}."
+            )
 
         if not claims.get('email'):
             raise AuthenticationFailed(
