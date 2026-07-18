@@ -2,8 +2,12 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 56px);
+  height: 100vh; // pas de bandeau horizontal en desktop — la sidebar est verticale
   overflow: hidden;
+}
+
+@media (max-width: 899px) {
+  .page { height: calc(100vh - var(--nav-h)); } // bandeau mobile compact au-dessus
 }
 
 .toolbar {
@@ -12,8 +16,8 @@
   gap: 14px;
   flex-wrap: wrap;
   padding: 10px 16px;
-  background: #fff;
-  border-bottom: 1px solid #e6eaef;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
   z-index: 3;
 }
 
@@ -28,19 +32,50 @@
   }
 }
 
+/* Bouton « ⋯ Actions » : masqué en desktop, où toute la rangée d'actions
+   (Réorganiser, Partager, …) tient déjà sans gêner. */
+.toolbar-toggle {
+  display: none;
+}
+
+@media (max-width: 899px) {
+  /* Repliée par défaut : la rangée d'actions ne s'affiche qu'au clic sur
+     « ⋯ Actions », pour ne pas empiéter sur la hauteur, déjà réduite,
+     laissée au canevas par le bandeau mobile. */
+  .toolbar-toggle {
+    display: inline-flex;
+    margin-left: auto;
+  }
+
+  /* `.group.toolbar-actions` (et non `.toolbar-actions` seul) : compound
+     selector à spécificité 0,2,0, pour ne jamais dépendre de l'ordre des
+     règles face à `.group { display:flex }` ci-dessus (même spécificité seule
+     à seule, donc une réorganisation future du fichier pourrait sinon faire
+     perdre silencieusement cette règle). */
+  .group.toolbar-actions {
+    display: none;
+    width: 100%;
+    flex-wrap: wrap;
+
+    &.expanded {
+      display: flex;
+    }
+  }
+}
+
 .select,
 .input {
-  border: 1px solid #dde2e8;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 7px 10px;
   font-size: 0.85rem;
-  color: #2c3742;
-  background: #fff;
+  color: var(--text);
+  background: var(--card);
   outline: none;
 
   &:focus {
-    border-color: #1976d2;
-    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.12);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
   }
 }
 
@@ -54,15 +89,15 @@
   padding: 7px 12px;
   font-size: 0.82rem;
   cursor: pointer;
-  border: 1px solid #dde2e8;
-  background: #fff;
-  color: #42505f;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
   white-space: nowrap;
   transition: background 0.15s ease, border-color 0.15s ease;
 
   &:hover:not(:disabled) {
-    background: #f4f7fa;
-    border-color: #c6cfd8;
+    background: var(--bg);
+    border-color: var(--border);
   }
 
   &:disabled {
@@ -71,12 +106,12 @@
   }
 
   &.primary {
-    background: #1976d2;
-    border-color: #1976d2;
-    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-on);
 
     &:hover:not(:disabled) {
-      background: #1565c0;
+      background: var(--accent-deep);
     }
   }
 
@@ -87,9 +122,9 @@
 
   // Bascule active : l'état doit se lire d'un coup d'œil.
   &.toggle.on {
-    background: #e8f2fd;
-    border-color: #a8cdf3;
-    color: #1565c0;
+    background: var(--accent-tint);
+    border-color: var(--accent);
+    color: var(--accent-deep);
     font-weight: 600;
   }
 }
@@ -100,13 +135,13 @@
   font-size: 0.82rem;
 
   &.info {
-    background: #e8f2fd;
-    color: #14538f;
+    background: var(--accent-tint);
+    color: var(--accent-deep);
   }
 
   &.error {
-    background: #fdecea;
-    color: #a52717;
+    background: var(--danger-tint);
+    color: var(--danger);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -129,11 +164,11 @@
   justify-content: center;
   gap: 10px;
   text-align: center;
-  color: #6b7684;
+  color: var(--text-mute);
 
   h2 {
     margin: 0;
-    color: #2c3742;
+    color: var(--text);
     font-size: 1.3rem;
   }
 
@@ -169,8 +204,8 @@
 .share-panel {
   margin: 0 16px 12px;
   padding: 14px 16px;
-  background: #fff;
-  border: 1px solid #e3e7ec;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
 
   h3 {
@@ -180,7 +215,7 @@
 
   .muted {
     margin: 0 0 12px;
-    color: #6b7784;
+    color: var(--text-mute);
     font-size: 0.8rem;
 
     &.small {
@@ -211,7 +246,7 @@
     align-items: center;
     gap: 8px;
     padding: 7px 0;
-    border-top: 1px solid #f0f2f5;
+    border-top: 1px solid var(--border);
   }
 
   .who {
@@ -224,9 +259,9 @@
    l'absence des boutons d'édition passe pour un bug. */
 .badge-role {
   font-size: 0.8rem;
-  color: #6b7784;
-  background: #f1f4f7;
-  border: 1px solid #e3e7ec;
+  color: var(--text-mute);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 5px 12px;
 }
@@ -253,7 +288,7 @@
   // Le lien s'épaissit et rougit au survol : il devient visiblement cliquable,
   // et l'on voit lequel des traits qui se croisent est visé.
   &:hover path:first-child {
-    stroke: #d64b3a;
+    stroke: var(--danger);
     stroke-width: 3;
   }
 }
@@ -268,7 +303,7 @@
 // Trait d'aide : montre la ligne de génération sur laquelle la carte va se poser.
 .guide {
   position: absolute;
-  background: #1976d2;
+  background: var(--accent);
   opacity: 0.35;
   pointer-events: none;
   z-index: 1;
@@ -296,15 +331,16 @@
   width: 16px;
   height: 16px;
   padding: 0;
-  border: 2px solid #cfd6de;
-  background: #fff;
+  border: 2px solid var(--border);
+  background: var(--card);
   border-radius: 50%;
   cursor: grab;
   transition: transform 0.15s ease, border-color 0.15s ease;
 
+  // Accent rose distinct (marque une union) — cf. person-editor.component.scss.
   &.married {
     border-color: #e0a3bd;
-    background: #fdf2f7;
+    background: color-mix(in srgb, #e0a3bd 25%, var(--card));
   }
 
   &:hover {
@@ -318,10 +354,10 @@
   bottom: 14px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid #e6eaef;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  border: 1px solid var(--border);
   font-size: 0.72rem;
-  color: #6b7684;
+  color: var(--text-mute);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }

@@ -40,7 +40,18 @@
         </div>
       }
 
-      <div class="group">
+      <button
+        type="button"
+        class="btn ghost toggle toolbar-toggle"
+        [class.on]="toolbarExpanded()"
+        (click)="toolbarExpanded.set(!toolbarExpanded())"
+        [attr.aria-expanded]="toolbarExpanded()"
+        title="Plus d'actions"
+      >
+        ⋯ Actions
+      </button>
+
+      <div class="group toolbar-actions" [class.expanded]="toolbarExpanded()">
         @if (canEdit()) {
           <button type="button" class="btn ghost" (click)="autoLayout()" title="Replacer automatiquement toutes les cartes">
             Réorganiser
@@ -174,8 +185,8 @@
         (wheel)="onWheel($event)"
         (pointerdown)="onCanvasPointerDown($event)"
         (pointermove)="onPointerMove($event)"
-        (pointerup)="onPointerUp()"
-        (pointercancel)="onPointerUp()"
+        (pointerup)="onPointerUp($event)"
+        (pointercancel)="onPointerUp($event)"
       >
         <div
           class="viewport"

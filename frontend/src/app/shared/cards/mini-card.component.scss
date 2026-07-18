@@ -45,7 +45,7 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: color-mix(in srgb, var(--accent) 10%, #eef1f5);
+  background: color-mix(in srgb, var(--accent) 10%, var(--border));
 
   img {
     width: 100%;

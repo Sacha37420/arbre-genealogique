@@ -10,7 +10,7 @@
 .axis {
   position: relative;
   height: 1px;
-  background: #e3e7ec;
+  background: var(--border);
   margin-bottom: 10px;
 }
 
@@ -26,13 +26,13 @@
     top: 16px;
     width: 1px;
     height: 5px;
-    background: #cfd6de;
+    background: var(--border);
   }
 }
 
 .tick-label {
   font-size: 0.7rem;
-  color: #8b95a1;
+  color: var(--text-mute);
   font-variant-numeric: tabular-nums;
 }
 
@@ -47,6 +47,8 @@
   border: none;
   border-radius: 10px;
   padding: 0 8px;
+  // Texte blanc fixe : le fond est la couleur de catégorie dynamique
+  // (CATEGORY_COLORS), pas un token de thème.
   color: #fff;
   font-size: 0.7rem;
   line-height: 20px;
@@ -113,7 +115,7 @@
 
 .event-label {
   font-size: 0.66rem;
-  color: #5c6773;
+  color: var(--text-mute);
   opacity: 0.75;
   white-space: nowrap;
   // Les libellés se croiseraient sur une vie dense : on les incline.
@@ -124,7 +126,7 @@
 }
 
 .empty {
-  color: #8b95a1;
+  color: var(--text-mute);
   font-size: 0.85rem;
   font-style: italic;
   margin: 12px 0;
@@ -137,27 +139,27 @@
   gap: 6px;
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px dashed #e3e7ec;
+  border-top: 1px dashed var(--border);
 }
 
 .undated-title {
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #98a2ae;
+  color: var(--text-mute);
 }
 
 .chip {
   border: 1px solid;
   border-radius: 999px;
-  background: #fff;
+  background: var(--card);
   padding: 3px 10px;
   font-size: 0.72rem;
   cursor: pointer;
-  color: #42505f;
+  color: var(--text);
 
   &.active {
-    background: #f2f5f9;
+    background: var(--bg);
     font-weight: 600;
   }
 }
@@ -165,8 +167,8 @@
 .detail {
   margin-top: 14px;
   padding: 12px 14px;
-  background: #f8fafc;
-  border: 1px solid #e6eaef;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 
@@ -178,6 +180,7 @@
 }
 
 .badge {
+  // Texte blanc fixe : le fond est la couleur de catégorie dynamique.
   color: #fff;
   font-size: 0.65rem;
   text-transform: uppercase;
@@ -193,10 +196,10 @@
   font-size: 1.2rem;
   line-height: 1;
   cursor: pointer;
-  color: #98a2ae;
+  color: var(--text-mute);
 
   &:hover {
-    color: #42505f;
+    color: var(--text);
   }
 }
 
@@ -209,12 +212,12 @@ dl {
 }
 
 dt {
-  color: #8b95a1;
+  color: var(--text-mute);
 }
 
 dd {
   margin: 0;
-  color: #2c3742;
+  color: var(--text);
 }
 
 .link {
@@ -222,7 +225,7 @@ dd {
   border: none;
   background: none;
   padding: 0;
-  color: #1976d2;
+  color: var(--accent);
   font-size: 0.82rem;
   cursor: pointer;
 

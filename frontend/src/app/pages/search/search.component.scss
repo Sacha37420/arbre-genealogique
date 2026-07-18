@@ -14,13 +14,13 @@
   h1 {
     margin: 0;
     font-size: 1.35rem;
-    color: #1f2733;
+    color: var(--text);
   }
 }
 
 .subtitle {
   margin: 4px 0 0;
-  color: #6b7684;
+  color: var(--text-mute);
   font-size: 0.85rem;
   max-width: 640px;
   line-height: 1.5;
@@ -30,24 +30,24 @@ h2 {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #98a2ae;
+  color: var(--text-mute);
   font-weight: 600;
   margin: 0;
 }
 
 .select,
 .input {
-  border: 1px solid #dde2e8;
+  border: 1px solid var(--border);
   border-radius: 7px;
   padding: 7px 10px;
   font-size: 0.85rem;
-  color: #2c3742;
-  background: #fff;
+  color: var(--text);
+  background: var(--card);
   outline: none;
 
   &:focus {
-    border-color: #1976d2;
-    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.12);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
   }
 }
 
@@ -56,26 +56,26 @@ h2 {
   padding: 8px 14px;
   font-size: 0.83rem;
   cursor: pointer;
-  border: 1px solid #dde2e8;
-  background: #fff;
-  color: #42505f;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
   white-space: nowrap;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
 
   &:hover:not(:disabled) {
-    background: #f4f7fa;
-    border-color: #c6cfd8;
+    background: var(--bg);
+    border-color: var(--border);
   }
 
   &.primary {
-    background: #1976d2;
-    border-color: #1976d2;
-    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-on);
 
     &:hover:not(:disabled) {
-      background: #1565c0;
+      background: var(--accent-deep);
     }
   }
 
@@ -109,27 +109,27 @@ h2 {
   align-items: flex-start;
   gap: 5px;
   padding: 12px;
-  border: 1px solid #e2e7ec;
+  border: 1px solid var(--border);
   border-radius: 11px;
-  background: #fff;
+  background: var(--card);
   cursor: pointer;
   text-align: left;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
   &:hover {
-    border-color: #c6cfd8;
+    border-color: var(--border);
   }
 
   &.active {
-    border-color: #1976d2;
-    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.12);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
   }
 }
 
 .provider-name {
   font-weight: 600;
   font-size: 0.9rem;
-  color: #1f2733;
+  color: var(--text);
 }
 
 .badge {
@@ -138,39 +138,39 @@ h2 {
   letter-spacing: 0.04em;
   padding: 2px 7px;
   border-radius: 999px;
-  background: #fdf0e3;
-  color: #9a5b12;
+  background: var(--warning-tint);
+  color: var(--warning);
 
   &.free {
-    background: #e6f5ea;
-    color: #1e7b34;
+    background: var(--success-tint);
+    color: var(--success);
   }
 }
 
 .coverage {
   font-size: 0.73rem;
-  color: #8b95a1;
+  color: var(--text-mute);
   line-height: 1.4;
 }
 
 .provider-help {
   margin: 10px 0 0;
   font-size: 0.79rem;
-  color: #6b7684;
+  color: var(--text-mute);
   line-height: 1.5;
 
   a {
     margin-left: 6px;
-    color: #1976d2;
+    color: var(--accent);
   }
 }
 
 .keys {
   margin-top: 14px;
   padding: 14px 16px;
-  border: 1px solid #e6eaef;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: #fbfcfd;
+  background: var(--bg);
 }
 
 .key-block {
@@ -187,7 +187,7 @@ h2 {
   justify-content: space-between;
   margin-bottom: 6px;
   font-size: 0.85rem;
-  color: #2c3742;
+  color: var(--text);
 }
 
 .link {
@@ -195,7 +195,7 @@ h2 {
   background: none;
   padding: 0;
   font-size: 0.75rem;
-  color: #1976d2;
+  color: var(--accent);
   cursor: pointer;
 
   &:hover {
@@ -212,7 +212,7 @@ h2 {
   > span {
     flex: 0 0 140px;
     font-size: 0.8rem;
-    color: #6b7684;
+    color: var(--text-mute);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 
@@ -224,7 +224,7 @@ h2 {
 
 .hint {
   font-size: 0.76rem;
-  color: #8b95a1;
+  color: var(--text-mute);
   line-height: 1.5;
   margin: 8px 0 0;
 }
@@ -233,9 +233,9 @@ h2 {
 .form {
   margin-top: 22px;
   padding: 16px;
-  border: 1px solid #e6eaef;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: #fff;
+  background: var(--card);
 }
 
 .fields {
@@ -258,7 +258,7 @@ h2 {
 
     span {
       font-size: 0.72rem;
-      color: #8b95a1;
+      color: var(--text-mute);
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
@@ -268,7 +268,7 @@ h2 {
 .warn {
   margin: 10px 0 0;
   font-size: 0.8rem;
-  color: #9a5b12;
+  color: var(--warning);
 }
 
 // ── Options d'import ─────────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ h2 {
   flex-wrap: wrap;
   margin-top: 14px;
   padding: 12px 16px;
-  border: 1px dashed #dbe1e8;
+  border: 1px dashed var(--border);
   border-radius: 12px;
 
   .row {
@@ -298,7 +298,7 @@ h2 {
   align-items: center;
   gap: 6px;
   font-size: 0.8rem;
-  color: #42505f;
+  color: var(--text);
   cursor: pointer;
 }
 
@@ -310,13 +310,13 @@ h2 {
   font-size: 0.83rem;
 
   &.info {
-    background: #e8f2fd;
-    color: #14538f;
+    background: var(--accent-tint);
+    color: var(--accent-deep);
   }
 
   &.error {
-    background: #fdecea;
-    color: #a52717;
+    background: var(--danger-tint);
+    color: var(--danger);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -350,13 +350,13 @@ h2 {
   align-items: center;
   gap: 14px;
   padding: 12px 14px;
-  border: 1px solid #e6eaef;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: #fff;
+  background: var(--card);
   transition: border-color 0.15s ease;
 
   &:hover {
-    border-color: #c6cfd8;
+    border-color: var(--border);
   }
 }
 
@@ -366,7 +366,7 @@ h2 {
   height: 52px;
   border-radius: 10px;
   overflow: hidden;
-  background: #eef1f5;
+  background: var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -391,7 +391,7 @@ h2 {
   gap: 8px;
 
   strong {
-    color: #1f2733;
+    color: var(--text);
     font-size: 0.95rem;
   }
 }
@@ -400,13 +400,13 @@ h2 {
   font-size: 0.68rem;
   padding: 2px 7px;
   border-radius: 999px;
-  background: #f0f2f5;
-  color: #6b7684;
+  background: var(--bg);
+  color: var(--text-mute);
   font-variant-numeric: tabular-nums;
 
   &.high {
-    background: #e6f5ea;
-    color: #1e7b34;
+    background: var(--success-tint);
+    color: var(--success);
   }
 }
 
@@ -416,17 +416,17 @@ h2 {
   gap: 10px;
   margin-top: 3px;
   font-size: 0.78rem;
-  color: #6b7684;
+  color: var(--text-mute);
 
   .place {
-    color: #98a2ae;
+    color: var(--text-mute);
   }
 }
 
 .description {
   margin: 4px 0 0;
   font-size: 0.78rem;
-  color: #8b95a1;
+  color: var(--text-mute);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -454,7 +454,7 @@ h2 {
   width: min(620px, 100%);
   max-height: 84vh;
   overflow-y: auto;
-  background: #fff;
+  background: var(--card);
   border-radius: 16px;
   padding: 20px 22px;
   box-shadow: 0 24px 60px rgba(20, 30, 45, 0.28);
@@ -468,7 +468,7 @@ h2 {
       font-size: 1.15rem;
       text-transform: none;
       letter-spacing: 0;
-      color: #1f2733;
+      color: var(--text);
     }
   }
 
@@ -477,7 +477,7 @@ h2 {
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #98a2ae;
+    color: var(--text-mute);
   }
 }
 
@@ -486,11 +486,11 @@ h2 {
   background: none;
   font-size: 1.5rem;
   line-height: 1;
-  color: #a2abb6;
+  color: var(--text-mute);
   cursor: pointer;
 
   &:hover {
-    color: #42505f;
+    color: var(--text);
   }
 }
 
@@ -503,12 +503,12 @@ dl {
 }
 
 dt {
-  color: #8b95a1;
+  color: var(--text-mute);
 }
 
 dd {
   margin: 0;
-  color: #2c3742;
+  color: var(--text);
 }
 
 .relatives {
@@ -524,7 +524,7 @@ dd {
     align-items: center;
     gap: 10px;
     padding: 6px 10px;
-    background: #f8fafc;
+    background: var(--bg);
     border-radius: 8px;
     font-size: 0.82rem;
   }
@@ -535,16 +535,16 @@ dd {
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #98a2ae;
+  color: var(--text-mute);
 }
 
 .relative-name {
   flex: 1;
-  color: #2c3742;
+  color: var(--text);
 }
 
 .relative-date {
-  color: #8b95a1;
+  color: var(--text-mute);
   font-size: 0.76rem;
 }
 

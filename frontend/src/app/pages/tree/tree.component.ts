@@ -63,6 +63,10 @@ export class TreeComponent {
   readonly loading = signal(false);
   readonly error = signal('');
 
+  /** Repliée par défaut sous 900px : évite que la rangée d'actions (Réorganiser,
+   *  Partager, …) n'empiète sur la hauteur, réduite, allouée au canevas. */
+  readonly toolbarExpanded = signal(false);
+
   readonly selected = signal<PersonCard | null>(null);
   readonly timeline = signal<Timeline | null>(null);
   readonly editing = signal(false);
@@ -82,6 +86,22 @@ export class TreeComponent {
     moved: boolean;
   } | null = null;
   private panning: { startX: number; startY: number; originX: number; originY: number } | null = null;
+
+  /**
+   * Doigts actuellement posés sur le canevas (tactile). `touch-action: none` sur
+   * `.canvas` désactive le pincement natif du navigateur (il faut, sinon, laisser
+   * passer le geste de glissement à un doigt) — le pincement à deux doigts est donc
+   * recalculé ici à la main à partir des Pointer Events, plutôt que délégué au navigateur.
+   */
+  private readonly activePointers = new Map<number, { x: number; y: number }>();
+  private pinch: {
+    startDistance: number;
+    startZoom: number;
+    startMidX: number;
+    startMidY: number;
+    startPanX: number;
+    startPanY: number;
+  } | null = null;
 
   /** Un vrai glissement se termine par un « click » : il ne doit pas ouvrir la fiche. */
   private suppressClick = false;
@@ -279,13 +299,58 @@ export class TreeComponent {
   }
 
   onCanvasPointerDown(event: PointerEvent): void {
+    if (event.pointerType === 'touch') {
+      this.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+
+      if (this.activePointers.size === 2) {
+        // Un deuxième doigt arrive : on abandonne le glissement à un doigt (pan ou
+        // carte) au profit du pincement, qui prend le dessus tant que 2 doigts touchent.
+        this.panning = null;
+        this.drag = null;
+        this.startPinch(event.currentTarget as HTMLElement);
+        return;
+      }
+      if (this.activePointers.size > 2) return;
+    }
+
     if (event.button !== 0) return;
     const pan = this.pan();
     this.panning = { startX: event.clientX, startY: event.clientY, originX: pan.x, originY: pan.y };
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   }
 
+  /** (Re)calcule le point de départ du pincement à partir des 2 doigts actuellement posés. */
+  private startPinch(canvasEl: HTMLElement): void {
+    const [a, b] = [...this.activePointers.values()];
+    if (!a || !b) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const pan = this.pan();
+    this.pinch = {
+      startDistance: Math.hypot(b.x - a.x, b.y - a.y),
+      startZoom: this.zoom(),
+      startMidX: (a.x + b.x) / 2 - rect.left,
+      startMidY: (a.y + b.y) / 2 - rect.top,
+      startPanX: pan.x,
+      startPanY: pan.y,
+    };
+  }
+
   onNodePointerDown(event: PointerEvent, key: string): void {
+    if (event.pointerType === 'touch') {
+      // Un pincement peut démarrer avec un premier doigt posé sur une carte : sans ce
+      // suivi, ce doigt-là resterait invisible de activePointers et le 2e doigt ne
+      // détecterait jamais le pincement (voir onCanvasPointerDown).
+      this.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (this.activePointers.size === 2) {
+        this.drag = null;
+        this.panning = null;
+        this.startPinch(document.querySelector('.canvas') as HTMLElement);
+        return;
+      }
+      if (this.activePointers.size > 2) return;
+    }
+
     if (event.button !== 0) return;
     // Déplacer une carte, c'est écrire (la position est épinglée en base) : sur un
     // arbre partagé en lecture, la carte ne bouge pas. Le clic, lui, ouvre la fiche.
@@ -305,6 +370,35 @@ export class TreeComponent {
   }
 
   onPointerMove(event: PointerEvent): void {
+    if (event.pointerType === 'touch' && this.activePointers.has(event.pointerId)) {
+      this.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      if (this.pinch && this.activePointers.size === 2) {
+        const [a, b] = [...this.activePointers.values()];
+        const distance = Math.hypot(b.x - a.x, b.y - a.y);
+        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+        const midX = (a.x + b.x) / 2 - rect.left;
+        const midY = (a.y + b.y) / 2 - rect.top;
+
+        // Distance nulle au départ (doigts posés au même point) : rien à mesurer encore.
+        if (this.pinch.startDistance < 1) return;
+
+        const next = Math.min(Math.max(this.pinch.startZoom * (distance / this.pinch.startDistance), 0.2), 3);
+        const scaleRatio = next / this.pinch.startZoom;
+
+        // Ancre le point sous le milieu de départ des 2 doigts à leur milieu courant
+        // (zoom centré sur le pincement) tout en suivant le déplacement du milieu
+        // (pan à 2 doigts) — les deux gestes sont ainsi combinés naturellement.
+        this.pan.set({
+          x: midX - (this.pinch.startMidX - this.pinch.startPanX) * scaleRatio,
+          y: midY - (this.pinch.startMidY - this.pinch.startPanY) * scaleRatio,
+        });
+        this.zoom.set(next);
+        return;
+      }
+      if (this.activePointers.size >= 2) return;
+    }
+
     const scale = this.zoom();
 
     if (this.drag) {
@@ -369,7 +463,22 @@ export class TreeComponent {
     return { horizontal: !horizontal, at: row };
   }
 
-  onPointerUp(): void {
+  onPointerUp(event?: PointerEvent): void {
+    let resumedSingleFingerPan = false;
+
+    if (event?.pointerType === 'touch' && this.activePointers.has(event.pointerId)) {
+      this.activePointers.delete(event.pointerId);
+      this.pinch = null;
+
+      if (this.activePointers.size === 1) {
+        // Il reste un doigt : on repart sur un pan classique à un doigt depuis sa position actuelle.
+        const [remaining] = [...this.activePointers.values()];
+        const pan = this.pan();
+        this.panning = { startX: remaining.x, startY: remaining.y, originX: pan.x, originY: pan.y };
+        resumedSingleFingerPan = true;
+      }
+    }
+
     this.guide.set(null);
 
     if (this.drag) {
@@ -391,7 +500,7 @@ export class TreeComponent {
         }
       }
     }
-    this.panning = null;
+    if (!resumedSingleFingerPan) this.panning = null;
   }
 
   /** Rend la main au moteur de placement : toutes les cartes sont désépinglées. */
