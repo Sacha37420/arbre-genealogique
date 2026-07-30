@@ -184,9 +184,7 @@ class MediaObjectSerializer(serializers.ModelSerializer):
         read_only_fields = ['size', 'checksum', 'created_at']
 
     def get_file_url(self, obj: MediaObject) -> str:
-        if obj.storage_path:
-            return f'/api/media/{obj.pk}/file/'
-        return obj.external_url
+        return storage_client.media_url(obj)
 
     def _decode(self, validated: dict, instance: MediaObject | None = None) -> dict:
         """Dépose le base64 reçu dans storage et remplace-le par son chemin.
@@ -208,7 +206,19 @@ class MediaObjectSerializer(serializers.ModelSerializer):
         # la fiche plutôt que de retomber sur un chemin anonyme dans storage.
         nom = validated.get('filename') or getattr(instance, 'filename', '') or 'media'
         mime = validated.get('mime') or getattr(instance, 'mime', '') or 'application/octet-stream'
-        validated['storage_path'] = storage_upload(blob, nom, mime)
+        # Le partage storage est PAR ARBRE (namespace_for_tree) : sur une
+        # création, l'arbre vient de `validated['tree']` ; sur une mise à jour
+        # sans changement d'arbre, de l'instance existante.
+        tree = validated.get('tree') or (instance.tree if instance else None)
+        namespace = storage_client.namespace_for_tree(tree.pk) if tree else None
+        try:
+            validated['storage_path'] = storage_upload(blob, nom, mime, namespace=namespace)
+        except storage_client.StorageClientError as exc:
+            # Pré-existant avant cette migration (le chemin base64 ne catchait déjà
+            # pas cette erreur, contrairement au chemin multipart de
+            # MediaObjectViewSet.create) : sans ce filet, une panne storage remonte
+            # en 500 brut au lieu d'une erreur DRF propre.
+            raise serializers.ValidationError(f'Stockage indisponible : {exc}')
         validated['size'] = len(blob)
         validated['checksum'] = hashlib.sha256(blob).hexdigest()
         return validated
@@ -218,13 +228,18 @@ class MediaObjectSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         ancien = instance.storage_path
+        # Capturé AVANT super().update() : celui-ci mute `instance` en place,
+        # et si `tree` fait partie de ce PATCH, `instance.tree_id` pointerait
+        # déjà vers le NOUVEL arbre une fois l'update appliqué — l'ancien blob
+        # doit lui être purgé depuis le namespace de l'arbre D'ORIGINE.
+        ancien_namespace = storage_client.namespace_for_tree(instance.tree_id)
         prepared = self._decode(validated_data, instance)
         media = super().update(instance, prepared)
         # Remplacement du contenu : l'ancien blob n'est plus référencé. Purge
         # après coup, pour ne pas le perdre si l'écriture du nouveau échouait.
         if ancien and prepared.get('storage_path') and prepared['storage_path'] != ancien:
             try:
-                storage_client.delete(ancien)
+                storage_client.delete(ancien, namespace=ancien_namespace)
             except storage_client.StorageClientError:
                 pass
         return media
@@ -242,7 +257,7 @@ class MediaLinkSerializer(serializers.ModelSerializer):
         ]
 
     def get_file_url(self, obj: MediaLink) -> str:
-        return f'/api/media/{obj.media_id}/file/' if obj.media.storage_path else obj.media.external_url
+        return storage_client.media_url(obj.media)
 
 
 class IndividualSerializer(serializers.ModelSerializer):
@@ -311,7 +326,7 @@ class IndividualSerializer(serializers.ModelSerializer):
         link = next((l for l in obj.media_links.all() if l.is_primary), None)
         if not link:
             return None
-        return f'/api/media/{link.media_id}/file/' if link.media.storage_path else link.media.external_url
+        return storage_client.media_url(link.media) or None
 
 
 class IndividualWriteSerializer(serializers.ModelSerializer):

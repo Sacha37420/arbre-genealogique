@@ -647,11 +647,13 @@ class MediaObject(models.Model):
     title = models.CharField(max_length=250, blank=True)
     description = models.TextField(blank=True)
 
-    #: Chemin logique dans le partage storage de l'app (jamais un chemin sur
-    #: disque) — vide si le média est resté chez un tiers (external_url).
-    #: `storage_path` et `external_url` sont exclusifs : c'est la présence du
-    #: premier qui distingue « média hébergé ici » de « média externe » partout
-    #: dans le code (file_url des sérialiseurs, graph.py, action `file`).
+    #: Chemin logique dans le partage storage DE CET ARBRE (jamais un chemin sur
+    #: disque, jamais le namespace — celui-ci se retrouve à partir de `tree_id`
+    #: via storage_client.namespace_for_tree) — vide si le média est resté chez
+    #: un tiers (external_url). `storage_path` et `external_url` sont exclusifs :
+    #: c'est la présence du premier qui distingue « média hébergé ici » de
+    #: « média externe » partout dans le code (storage_client.media_url,
+    #: graph.py, action `file`).
     #: Les octets sont purgés de storage par le signal post_delete ci-dessous.
     storage_path = models.CharField(max_length=1024, blank=True, default='')
     mime = models.CharField(max_length=100, default='image/jpeg')
@@ -696,7 +698,10 @@ def _purge_blob_storage(sender, instance: 'MediaObject', **kwargs) -> None:
         return
     from . import storage_client
     try:
-        storage_client.delete(instance.storage_path)
+        storage_client.delete(
+            instance.storage_path,
+            namespace=storage_client.namespace_for_tree(instance.tree_id),
+        )
     except storage_client.StorageClientError as exc:
         logger.warning(
             'Purge storage échouée pour le média %s (%s) : %s',

@@ -175,12 +175,21 @@ TEMPLATES = [
 # ── Stockage des médias (délégué à l'app storage) ─────────────────────────────
 # Les octets ne sont plus dans devdb (ancien MediaObject.data, un BinaryField —
 # voir CLAUDE.md racine, section « Fichiers rasters / médias ») : ils vivent dans
-# un unique partage de l'app storage, écrit et lu par le compte de service
-# 'arbre-genealogique-admin'. Le cloisonnement reste porté par OwnedTreeMixin
-# (Tree.owner_email / Tree.is_public / TreeShare) — storage n'en connaît rien.
-# Cf. api/storage_client.py.
+# un partage storage PAR ARBRE (namespace_for_tree, cf. api/storage_client.py),
+# écrit et lu par le compte de service 'arbre-genealogique-admin'. Depuis la
+# synchronisation TreeShare → Share/ShareMember (cf. storage_client.sync_tree_share),
+# un arbre privé se lit désormais en accès direct depuis le frontend (storage
+# devient lui-même le rempart) ; un arbre public reste proxié (aucun groupe
+# Keycloak ne correspond à « tout utilisateur de cette app », voir le docstring
+# de storage_client.py pour la discussion complète).
 STORAGE_INTERNAL_URL = config('STORAGE_INTERNAL_URL', default='http://storage-backend:8000')
 STORAGE_NAMESPACE = config('STORAGE_NAMESPACE', default='arbre-genealogique')
+# Domaine public (Caddy) — sert à construire l'URL storage directe
+# (https://<PUBLIC_DOMAIN>/storage-api/...) que le frontend appelle avec son
+# propre token. Même variable que nginx-entrypoint.sh (DOMAIN) : same-origin
+# garanti, donc pas de CORS à gérer. 'CHANGE_ME' (dev local sans domaine) fait
+# retomber storage_client.direct_url() sur le proxy — voir sa docstring.
+PUBLIC_DOMAIN = config('DOMAIN', default='CHANGE_ME')
 # Compte de service (client_credentials) — client compagnon confidentiel créé
 # par create-app-client.sh, déclenché par la présence de
 # .keycloak-service-account-roles (fichier sans aucun rôle : cette app

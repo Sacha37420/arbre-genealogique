@@ -12,6 +12,7 @@ deux parents pour un enfant sans croiser les liens.
 """
 from collections import deque
 
+from . import storage_client
 from .models import (
     CardTemplate,
     EdgeStyle,
@@ -187,8 +188,13 @@ def _year(event) -> int | None:
     return event.date_start.year if event and event.date_start else None
 
 
-def individual_card(indi: Individual) -> dict:
-    """Aplatit un individu en les champs qu'une carte d'identité sait afficher."""
+def individual_card(indi: Individual, tree: Tree) -> dict:
+    """Aplatit un individu en les champs qu'une carte d'identité sait afficher.
+
+    `tree` : l'arbre de `indi` (toujours le même pour tous les individus d'un
+    même `build_graph` / `preview`) — passé explicitement plutôt que relu via
+    `photo_link.media.tree` pour ne pas déclencher une requête par carte.
+    """
     name = _primary_name(indi)
     birth = _event(indi, EventTag.BIRT, EventTag.CHR, EventTag.BAPM)
     death = _event(indi, EventTag.DEAT, EventTag.BURI, EventTag.CREM)
@@ -200,7 +206,7 @@ def individual_card(indi: Individual) -> dict:
     crop = None
     if photo_link:
         media = photo_link.media
-        photo_url = f'/api/media/{media.pk}/file/' if media.storage_path else (media.external_url or None)
+        photo_url = storage_client.media_url(media, tree=tree) or None
         if photo_link.crop_width:
             crop = {
                 'x': photo_link.crop_x, 'y': photo_link.crop_y,
@@ -256,7 +262,7 @@ def build_graph(tree: Tree) -> dict:
 
     nodes = []
     for indi in individuals:
-        card = individual_card(indi)
+        card = individual_card(indi, tree)
         card['generation'] = generations.get(indi.pk, 0)
 
         layout = getattr(indi, 'layout', None)

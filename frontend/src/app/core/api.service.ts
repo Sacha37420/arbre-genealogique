@@ -37,11 +37,21 @@ export class ApiService {
    *
    * Le JWT part en paramètre d'URL : une balise <img> ne peut pas porter d'en-tête
    * Authorization, et l'intercepteur ne s'applique qu'aux requêtes HttpClient.
+   *
+   * Deux formes possibles depuis que MediaObjectSerializer/graph.py peuvent
+   * renvoyer une URL storage directe (arbre privé, cf. storage_client.media_url
+   * côté backend) plutôt que le chemin du proxy (/api/media/<id>/file/, arbre
+   * public ou repli dev sans DOMAIN) : dans les deux cas le `?token=` doit être
+   * ajouté — storage lit le même fallback que ce backend (KeycloakQueryTokenAuthentication
+   * / storage/backend/api/authentication.py), pas seulement le proxy de cette app.
    */
   mediaUrl(path: string | null): string {
     if (!path) return '';
-    if (path.startsWith('http')) return path;
     const token = this.kc.getToken();
+    if (path.startsWith('http')) {
+      if (!token) return path;
+      return `${path}${path.includes('?') ? '&' : '?'}token=${token}`;
+    }
     return `${this.base}${path}${token ? `?token=${token}` : ''}`;
   }
 

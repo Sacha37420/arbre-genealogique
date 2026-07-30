@@ -6,6 +6,7 @@ l'utilisateur Keycloak qui l'a créé : `owner_email` est renseigné par le serv
 depuis le JWT, jamais par le client.
 """
 import hashlib
+import logging
 
 import requests
 from django.db import transaction
@@ -15,7 +16,7 @@ from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -87,6 +88,21 @@ from .serializers import (
     TreeShareSerializer,
     TreeViewSettingsSerializer,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class StorageUnavailable(APIException):
+    """Levée quand la synchronisation storage (Share/ShareMember) échoue sur un
+    chemin où elle ne peut pas être traitée en best-effort : un partage/retrait
+    (TreeShareViewSet) qui ne se répercuterait pas dans storage laisserait
+    l'accès direct frontend → storage désynchronisé de TreeShare — c'est
+    justement ce que cette synchronisation est censée empêcher (cf.
+    api/storage_client.py, sync_tree_share)."""
+
+    status_code = 502
+    default_detail = 'Stockage indisponible.'
+    default_code = 'storage_unavailable'
 
 
 class MeView(APIView):
@@ -243,6 +259,15 @@ class TreeViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
         )
         # Un arbre neuf doit être affichable immédiatement : styles, gabarits, réglages.
         build_defaults(tree)
+        # Provisionne tout de suite le partage storage de l'arbre (propriétaire
+        # en membre écriture) : best-effort, contrairement à TreeShareViewSet.
+        # Un arbre neuf n'a encore ni média ni partage — un échec ici n'ouvre ni
+        # ne ferme aucun accès, et le prochain appel à sync_tree_share (premier
+        # partage créé, ou premier média) rattrapera l'état.
+        try:
+            storage_client.sync_tree_share(tree)
+        except storage_client.StorageClientError as exc:
+            logger.warning('Synchronisation storage échouée pour l’arbre %s : %s', tree.pk, exc)
 
     @extend_schema(
         summary='Graphe complet de l’arbre',
@@ -382,8 +407,8 @@ class TreeViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class IndividualViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
-    queryset = Individual.objects.prefetch_related(
-        'names', 'events__place', 'media_links__media',
+    queryset = Individual.objects.select_related('tree').prefetch_related(
+        'names', 'events__place', 'media_links__media__tree',
     )
     serializer_class = IndividualSerializer
 
@@ -565,23 +590,45 @@ class TreeShareViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
         if email == tree.owner_email:
             raise ValidationError('Cet arbre vous appartient déjà.')
 
-        share, _ = TreeShare.objects.update_or_create(
-            tree=tree,
-            email=email,
-            defaults={
-                'role': serializer.validated_data.get('role', TreeShare.Role.VIEWER),
-                'invited_by': request.user.email,
-            },
-        )
+        try:
+            with transaction.atomic():
+                share, _ = TreeShare.objects.update_or_create(
+                    tree=tree,
+                    email=email,
+                    defaults={
+                        'role': serializer.validated_data.get('role', TreeShare.Role.VIEWER),
+                        'invited_by': request.user.email,
+                    },
+                )
+                # Réplique TreeShare en Share/ShareMember réels côté storage :
+                # c'est ce qui rend sûr l'accès direct frontend → storage
+                # (storage_client.media_url). Dans la même transaction locale
+                # que l'upsert : un échec ici fait échouer la requête (502) et
+                # annule aussi le TreeShare, plutôt que de laisser un partage
+                # « actif » côté app mais invisible pour storage.
+                storage_client.sync_tree_share(tree)
+        except storage_client.StorageClientError as exc:
+            raise StorageUnavailable(f'Stockage indisponible : {exc}')
         return Response(self.get_serializer(share).data, status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):
         self.check_owner(serializer.instance.tree)
-        serializer.save()
+        try:
+            with transaction.atomic():
+                serializer.save()
+                storage_client.sync_tree_share(serializer.instance.tree)
+        except storage_client.StorageClientError as exc:
+            raise StorageUnavailable(f'Stockage indisponible : {exc}')
 
     def perform_destroy(self, instance):
         self.check_owner(instance.tree)
-        super().perform_destroy(instance)
+        tree = instance.tree
+        try:
+            with transaction.atomic():
+                super().perform_destroy(instance)
+                storage_client.sync_tree_share(tree)
+        except storage_client.StorageClientError as exc:
+            raise StorageUnavailable(f'Stockage indisponible : {exc}')
 
 
 def prune_family(family: Family | None) -> None:
@@ -725,7 +772,7 @@ class PlaceViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
 
 
 class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
-    queryset = MediaObject.objects.all()
+    queryset = MediaObject.objects.select_related('tree')
     serializer_class = MediaObjectSerializer
     parser_classes = [JSONParser, MultiPartParser]
 
@@ -742,7 +789,9 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
         # fiche sans contenu apparaîtrait dans la galerie comme une image cassée,
         # alors qu'un blob sans fiche n'est qu'un orphelin que rien ne sert.
         try:
-            storage_path = storage_client.upload_bytes(blob, upload.name, mime)
+            storage_path = storage_client.upload_bytes(
+                blob, upload.name, mime, namespace=storage_client.namespace_for_tree(tree.pk),
+            )
         except storage_client.StorageClientError as exc:
             return Response({'detail': f'Stockage indisponible : {exc}'},
                             status=status.HTTP_502_BAD_GATEWAY)
@@ -797,9 +846,18 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
         authentication_classes=[KeycloakQueryTokenAuthentication],
     )
     def file(self, request, pk=None):
-        """Proxie les octets depuis storage. Le cloisonnement reste ici :
-        get_object() applique le queryset d'OwnedTreeMixin (arbres visibles),
-        storage ne connaît ni Tree.owner_email, ni TreeShare, ni is_public."""
+        """Proxie les octets depuis storage.
+
+        Depuis la synchronisation TreeShare → Share/ShareMember, cette route
+        n'est plus le chemin principal : le sérialiseur renvoie une URL storage
+        directe (storage_client.media_url) pour tout arbre privé. Elle reste
+        nécessaire pour deux cas : un arbre public (Tree.is_public — storage n'a
+        aucune façon d'exprimer « tout utilisateur de cette app », voir le
+        docstring de storage_client.py) et le repli dev local sans DOMAIN
+        configuré. Le cloisonnement reste ici : get_object() applique le
+        queryset d'OwnedTreeMixin (arbres visibles), storage ne connaît ni
+        Tree.owner_email, ni is_public — seulement, pour un arbre privé, les
+        ShareMember répliqués depuis TreeShare."""
         media = self.get_object()
         if not media.storage_path:
             return Response(
@@ -808,7 +866,9 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
             )
 
         try:
-            upstream = storage_client.download(media.storage_path)
+            upstream = storage_client.download(
+                media.storage_path, namespace=storage_client.namespace_for_tree(media.tree_id),
+            )
         except storage_client.StorageClientError as exc:
             return Response({'detail': f'Stockage indisponible : {exc}'},
                             status=status.HTTP_502_BAD_GATEWAY)
@@ -858,7 +918,7 @@ def promote_remaining_photo(individual_id: int | None) -> None:
 
 
 class MediaLinkViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
-    queryset = MediaLink.objects.select_related('media')
+    queryset = MediaLink.objects.select_related('media__tree')
     serializer_class = MediaLinkSerializer
     tree_path = 'media__tree'
 
@@ -951,7 +1011,7 @@ class CardTemplateViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
             return Response({'detail': 'Aucun individu dans cet arbre pour l’aperçu.'},
                             status=status.HTTP_404_NOT_FOUND)
 
-        card = individual_card(individual)
+        card = individual_card(individual, template.tree)
         settings_obj, _ = TreeViewSettings.objects.get_or_create(tree=template.tree)
         rules = list(template.tree.style_rules.select_related('style').filter(enabled=True))
         card['style'] = resolve_style(card, rules, settings_obj.default_node_style, None)
@@ -1239,7 +1299,9 @@ class ProviderImportView(APIView):
             media = existant
         else:
             try:
-                storage_path = storage_client.upload_bytes(blob, filename, mime)
+                storage_path = storage_client.upload_bytes(
+                    blob, filename, mime, namespace=storage_client.namespace_for_tree(tree.pk),
+                )
             except storage_client.StorageClientError:
                 # Même politique que pour un téléchargement échoué : une photo
                 # indisponible ne doit pas faire échouer l'import des données.
