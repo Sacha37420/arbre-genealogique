@@ -10,7 +10,7 @@ import hashlib
 import requests
 from django.db import transaction
 from django.db.models import Q
-from django.http import HttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .auth_extra import KeycloakQueryTokenAuthentication
+from . import storage_client
 from .defaults import build_defaults
 from .gedcom import GedcomExporter, GedcomImporter, category_for, parse_date
 from .graph import build_graph, build_timeline
@@ -736,12 +737,21 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
 
         tree = self._tree_from(request.data.get('tree'))
         blob = upload.read()
+        mime = upload.content_type or 'application/octet-stream'
+        # Les octets partent vers storage AVANT la création de la fiche : une
+        # fiche sans contenu apparaîtrait dans la galerie comme une image cassée,
+        # alors qu'un blob sans fiche n'est qu'un orphelin que rien ne sert.
+        try:
+            storage_path = storage_client.upload_bytes(blob, upload.name, mime)
+        except storage_client.StorageClientError as exc:
+            return Response({'detail': f'Stockage indisponible : {exc}'},
+                            status=status.HTTP_502_BAD_GATEWAY)
         media = MediaObject.objects.create(
             tree=tree,
             title=request.data.get('title', '') or upload.name,
             filename=upload.name,
-            mime=upload.content_type or 'application/octet-stream',
-            data=blob,
+            mime=mime,
+            storage_path=storage_path,
             size=len(blob),
             checksum=hashlib.sha256(blob).hexdigest(),
         )
@@ -787,15 +797,27 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
         authentication_classes=[KeycloakQueryTokenAuthentication],
     )
     def file(self, request, pk=None):
+        """Proxie les octets depuis storage. Le cloisonnement reste ici :
+        get_object() applique le queryset d'OwnedTreeMixin (arbres visibles),
+        storage ne connaît ni Tree.owner_email, ni TreeShare, ni is_public."""
         media = self.get_object()
-        if not media.data:
+        if not media.storage_path:
             return Response(
                 {'detail': 'Ce média est externe.', 'external_url': media.external_url},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        response = HttpResponse(bytes(media.data), content_type=media.mime)
-        response['Content-Length'] = str(media.size or len(media.data))
+        try:
+            upstream = storage_client.download(media.storage_path)
+        except storage_client.StorageClientError as exc:
+            return Response({'detail': f'Stockage indisponible : {exc}'},
+                            status=status.HTTP_502_BAD_GATEWAY)
+
+        response = StreamingHttpResponse(
+            upstream.iter_content(chunk_size=65536), content_type=media.mime,
+        )
+        if media.size:
+            response['Content-Length'] = str(media.size)
         # Immuable : le contenu d'un média ne change jamais, seule sa fiche évolue.
         response['Cache-Control'] = 'private, max-age=86400'
         return response
@@ -1206,19 +1228,35 @@ class ProviderImportView(APIView):
 
         blob = response.content
         checksum = hashlib.sha256(blob).hexdigest()
-        media, created = MediaObject.objects.get_or_create(
-            tree=tree,
-            checksum=checksum,
-            defaults={
-                'title': result.full_name,
-                'data': blob,
-                'mime': response.headers.get('Content-Type', 'image/jpeg').split(';')[0],
-                'size': len(blob),
-                'filename': result.photo_url.rsplit('/', 1)[-1][:250],
-                'provider': result.provider,
-                'attribution': result.url,
-            },
-        )
+        mime = response.headers.get('Content-Type', 'image/jpeg').split(';')[0]
+        filename = result.photo_url.rsplit('/', 1)[-1][:250]
+
+        # Déduplication par checksum : ne pas déposer dans storage une photo que
+        # cet arbre possède déjà (get_or_create ignorerait 'defaults', mais le
+        # blob aurait quand même été écrit et serait resté orphelin).
+        existant = MediaObject.objects.filter(tree=tree, checksum=checksum).first()
+        if existant is not None:
+            media = existant
+        else:
+            try:
+                storage_path = storage_client.upload_bytes(blob, filename, mime)
+            except storage_client.StorageClientError:
+                # Même politique que pour un téléchargement échoué : une photo
+                # indisponible ne doit pas faire échouer l'import des données.
+                return
+            media, _ = MediaObject.objects.get_or_create(
+                tree=tree,
+                checksum=checksum,
+                defaults={
+                    'title': result.full_name,
+                    'storage_path': storage_path,
+                    'mime': mime,
+                    'size': len(blob),
+                    'filename': filename,
+                    'provider': result.provider,
+                    'attribution': result.url,
+                },
+            )
         if not individual.media_links.filter(media=media).exists():
             MediaLink.objects.create(
                 media=media,

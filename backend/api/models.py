@@ -10,12 +10,18 @@ besoin : positions des nœuds, styles, règles de style conditionnelles, gabarit
 de cartes d'identité, réglages de vue, champs personnalisés et résultats
 d'enrichissement issus des fournisseurs externes.
 
-Les photos sont stockées **en base** (MediaObject.data, BinaryField) et non sur
-le disque : l'application n'a donc pas de volume persistant à gérer.
+Les photos ne sont ni en base ni sur un volume propre à l'app : elles vivent dans
+l'app `storage`, point d'entrée unique du lab pour les fichiers utilisateur
+(MediaObject.storage_path, cf. api/storage_client.py).
 """
+import logging
 import uuid
 
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -641,8 +647,13 @@ class MediaObject(models.Model):
     title = models.CharField(max_length=250, blank=True)
     description = models.TextField(blank=True)
 
-    #: Contenu binaire du fichier (photo, scan d'acte…). NULL si external_url.
-    data = models.BinaryField(null=True, blank=True, editable=True)
+    #: Chemin logique dans le partage storage de l'app (jamais un chemin sur
+    #: disque) — vide si le média est resté chez un tiers (external_url).
+    #: `storage_path` et `external_url` sont exclusifs : c'est la présence du
+    #: premier qui distingue « média hébergé ici » de « média externe » partout
+    #: dans le code (file_url des sérialiseurs, graph.py, action `file`).
+    #: Les octets sont purgés de storage par le signal post_delete ci-dessous.
+    storage_path = models.CharField(max_length=1024, blank=True, default='')
     mime = models.CharField(max_length=100, default='image/jpeg')
     filename = models.CharField(max_length=250, blank=True)
     size = models.PositiveIntegerField(default=0)
@@ -664,6 +675,33 @@ class MediaObject(models.Model):
 
     def __str__(self) -> str:
         return self.title or self.filename or f'Média #{self.pk}'
+
+
+@receiver(post_delete, sender=MediaObject)
+def _purge_blob_storage(sender, instance: 'MediaObject', **kwargs) -> None:
+    """Supprime les octets de storage quand la fiche média disparaît.
+
+    Un signal plutôt qu'un hook de vue : un MediaObject est supprimé par au
+    moins quatre chemins différents — `MediaObjectViewSet.destroy`,
+    `MediaLinkViewSet.perform_destroy` (média que plus aucun lien ne réclame),
+    et les cascades depuis `Tree`. Les couvrir un par un laisserait des blobs
+    orphelins au premier chemin oublié, et les cascades ne passent de toute
+    façon par aucune vue.
+
+    Best-effort : l'échec de la purge ne doit pas faire échouer la suppression
+    (la fiche est déjà partie en base). Un blob orphelin est sans conséquence
+    fonctionnelle — plus rien ne le sert — seulement de la place occupée.
+    """
+    if not instance.storage_path:
+        return
+    from . import storage_client
+    try:
+        storage_client.delete(instance.storage_path)
+    except storage_client.StorageClientError as exc:
+        logger.warning(
+            'Purge storage échouée pour le média %s (%s) : %s',
+            instance.pk, instance.storage_path, exc,
+        )
 
 
 class MediaLink(models.Model):

@@ -200,7 +200,7 @@ def individual_card(indi: Individual) -> dict:
     crop = None
     if photo_link:
         media = photo_link.media
-        photo_url = f'/api/media/{media.pk}/file/' if media.data else (media.external_url or None)
+        photo_url = f'/api/media/{media.pk}/file/' if media.storage_path else (media.external_url or None)
         if photo_link.crop_width:
             crop = {
                 'x': photo_link.crop_x, 'y': photo_link.crop_y,

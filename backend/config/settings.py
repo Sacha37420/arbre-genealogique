@@ -171,3 +171,19 @@ TEMPLATES = [
         },
     },
 ]
+
+# ── Stockage des médias (délégué à l'app storage) ─────────────────────────────
+# Les octets ne sont plus dans devdb (ancien MediaObject.data, un BinaryField —
+# voir CLAUDE.md racine, section « Fichiers rasters / médias ») : ils vivent dans
+# un unique partage de l'app storage, écrit et lu par le compte de service
+# 'arbre-genealogique-admin'. Le cloisonnement reste porté par OwnedTreeMixin
+# (Tree.owner_email / Tree.is_public / TreeShare) — storage n'en connaît rien.
+# Cf. api/storage_client.py.
+STORAGE_INTERNAL_URL = config('STORAGE_INTERNAL_URL', default='http://storage-backend:8000')
+STORAGE_NAMESPACE = config('STORAGE_NAMESPACE', default='arbre-genealogique')
+# Compte de service (client_credentials) — client compagnon confidentiel créé
+# par create-app-client.sh, déclenché par la présence de
+# .keycloak-service-account-roles (fichier sans aucun rôle : cette app
+# n'administre pas Keycloak, elle n'utilise ce client que pour storage).
+KEYCLOAK_ADMIN_CLIENT_ID = config('KEYCLOAK_ADMIN_CLIENT_ID', default='arbre-genealogique-admin')
+KEYCLOAK_ADMIN_CLIENT_SECRET = config('KEYCLOAK_ADMIN_CLIENT_SECRET', default='')

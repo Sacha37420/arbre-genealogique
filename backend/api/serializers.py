@@ -4,6 +4,8 @@ import hashlib
 
 from rest_framework import serializers
 
+from . import storage_client
+from .storage_client import upload_bytes as storage_upload
 from .gedcom import category_for, parse_date
 from .models import (
     CardTemplate,
@@ -182,11 +184,17 @@ class MediaObjectSerializer(serializers.ModelSerializer):
         read_only_fields = ['size', 'checksum', 'created_at']
 
     def get_file_url(self, obj: MediaObject) -> str:
-        if obj.data:
+        if obj.storage_path:
             return f'/api/media/{obj.pk}/file/'
         return obj.external_url
 
-    def _decode(self, validated: dict) -> dict:
+    def _decode(self, validated: dict, instance: MediaObject | None = None) -> dict:
+        """Dépose le base64 reçu dans storage et remplace-le par son chemin.
+
+        Les octets ne transitent plus par la base : `data_base64` sert
+        uniquement de transport côté API (une balise <img> ou un canvas
+        produisent naturellement du base64, pas du multipart).
+        """
         raw = validated.pop('data_base64', None)
         if not raw:
             return validated
@@ -196,7 +204,11 @@ class MediaObjectSerializer(serializers.ModelSerializer):
             if 'mime' not in validated and ':' in header and ';' in header:
                 validated['mime'] = header.split(':', 1)[1].split(';', 1)[0]
         blob = base64.b64decode(raw)
-        validated['data'] = blob
+        # Sur un PATCH partiel, `filename` n'est pas renvoyé : reprendre celui de
+        # la fiche plutôt que de retomber sur un chemin anonyme dans storage.
+        nom = validated.get('filename') or getattr(instance, 'filename', '') or 'media'
+        mime = validated.get('mime') or getattr(instance, 'mime', '') or 'application/octet-stream'
+        validated['storage_path'] = storage_upload(blob, nom, mime)
         validated['size'] = len(blob)
         validated['checksum'] = hashlib.sha256(blob).hexdigest()
         return validated
@@ -205,7 +217,17 @@ class MediaObjectSerializer(serializers.ModelSerializer):
         return super().create(self._decode(validated_data))
 
     def update(self, instance, validated_data):
-        return super().update(instance, self._decode(validated_data))
+        ancien = instance.storage_path
+        prepared = self._decode(validated_data, instance)
+        media = super().update(instance, prepared)
+        # Remplacement du contenu : l'ancien blob n'est plus référencé. Purge
+        # après coup, pour ne pas le perdre si l'écriture du nouveau échouait.
+        if ancien and prepared.get('storage_path') and prepared['storage_path'] != ancien:
+            try:
+                storage_client.delete(ancien)
+            except storage_client.StorageClientError:
+                pass
+        return media
 
 
 class MediaLinkSerializer(serializers.ModelSerializer):
@@ -220,7 +242,7 @@ class MediaLinkSerializer(serializers.ModelSerializer):
         ]
 
     def get_file_url(self, obj: MediaLink) -> str:
-        return f'/api/media/{obj.media_id}/file/' if obj.media.data else obj.media.external_url
+        return f'/api/media/{obj.media_id}/file/' if obj.media.storage_path else obj.media.external_url
 
 
 class IndividualSerializer(serializers.ModelSerializer):
@@ -289,7 +311,7 @@ class IndividualSerializer(serializers.ModelSerializer):
         link = next((l for l in obj.media_links.all() if l.is_primary), None)
         if not link:
             return None
-        return f'/api/media/{link.media_id}/file/' if link.media.data else link.media.external_url
+        return f'/api/media/{link.media_id}/file/' if link.media.storage_path else link.media.external_url
 
 
 class IndividualWriteSerializer(serializers.ModelSerializer):
