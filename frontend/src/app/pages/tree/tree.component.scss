@@ -339,8 +339,8 @@
 
   // Accent rose distinct (marque une union) — cf. person-editor.component.scss.
   &.married {
-    border-color: #e0a3bd;
-    background: color-mix(in srgb, #e0a3bd 25%, var(--card));
+    border-color: var(--union-accent);
+    background: color-mix(in srgb, var(--union-accent) 25%, var(--card));
   }
 
   &:hover {

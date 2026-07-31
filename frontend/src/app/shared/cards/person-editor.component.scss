@@ -184,7 +184,7 @@ h4 {
 }
 
 .couple {
-  border-left: 3px solid #e0a3bd;
+  border-left: 3px solid var(--union-accent);
   padding-left: 10px;
   margin-bottom: 12px;
 
@@ -200,7 +200,7 @@ h4 {
   margin: 8px 0;
   padding: 8px;
   background: var(--card);
-  border: 1px solid #f0e3ea;
+  border: 1px solid var(--union-border);
   border-radius: 8px;
 }
 
@@ -222,8 +222,8 @@ h4 {
   font-size: 0.74rem;
   // Accent rose distinct (marque un couple/union) — mélangé au fond/texte du
   // thème actif pour rester lisible en sombre, plutôt qu'un rose pâle fixe.
-  color: color-mix(in srgb, #a0567c 70%, var(--text));
-  background: color-mix(in srgb, #e0a3bd 25%, var(--bg));
+  color: color-mix(in srgb, var(--union-text) 70%, var(--text));
+  background: color-mix(in srgb, var(--union-accent) 25%, var(--bg));
   border-radius: 999px;
   padding: 2px 10px;
   display: inline-block;

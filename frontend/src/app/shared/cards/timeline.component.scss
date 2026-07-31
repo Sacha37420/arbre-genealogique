@@ -49,7 +49,7 @@
   padding: 0 8px;
   // Texte blanc fixe : le fond est la couleur de catégorie dynamique
   // (CATEGORY_COLORS), pas un token de thème.
-  color: #fff;
+  color: var(--on-solid);
   font-size: 0.7rem;
   line-height: 20px;
   text-align: left;
@@ -68,7 +68,7 @@
 
   &.active {
     opacity: 1;
-    box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor;
+    box-shadow: 0 0 0 2px var(--on-solid), 0 0 0 4px currentColor;
   }
 }
 
@@ -108,7 +108,7 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  border: 2px solid #fff;
+  border: 2px solid var(--on-solid);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
   transition: transform 0.15s ease;
 }
@@ -181,7 +181,7 @@
 
 .badge {
   // Texte blanc fixe : le fond est la couleur de catégorie dynamique.
-  color: #fff;
+  color: var(--on-solid);
   font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;

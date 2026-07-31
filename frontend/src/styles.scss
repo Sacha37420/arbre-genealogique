@@ -36,6 +36,17 @@
   --sidebar-w: 240px;
   --sidebar-w-collapsed: 76px;
   color-scheme: light;
+
+  /* Accent rose distinct, sans rapport avec le thème clair/sombre — marque
+     une union/un couple (tree.component.scss, person-editor.component.scss).
+     Mélangé via color-mix() avec --text/--card/--bg à l'usage pour rester
+     lisible dans les deux thèmes plutôt que redéfini ici par thème. */
+  --union-accent: #e0a3bd;
+  --union-border: #f0e3ea;
+  --union-text:   #a0567c;
+
+  /* Texte clair fixe pour poser sur un aplat sombre (badge sur vignette). */
+  --on-solid: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
