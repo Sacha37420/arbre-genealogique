@@ -15,7 +15,7 @@ simulés — voir ``helpers.py``.
     test_metier.py        Dates GEDCOM, familles, vivants/décédés, générations,
                           styles conditionnels, import/export, enrichissement.
 
-Un test marqué ``expectedFailure`` montre un défaut du code de production,
-décrit dans son commentaire : il redeviendra « succès inattendu » (donc rouge)
-le jour où le défaut sera corrigé — retirer alors le décorateur.
+Les défauts que cette suite a montrés (D1 à D4 du rapport) sont corrigés ; un
+test ``expectedFailure`` ajouté plus tard montrerait un défaut connu, à corriger
+en retirant le décorateur.
 """

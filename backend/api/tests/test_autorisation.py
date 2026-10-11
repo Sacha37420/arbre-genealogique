@@ -8,7 +8,6 @@ règle par leur arbre.
 Acteurs : Alice possède `tree` (privé) et `public` ; Bob y est éditeur, Carol
 lectrice ; Dave est un compte du realm sans aucun lien, propriétaire de `other`.
 """
-import unittest
 from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -187,18 +186,14 @@ class CreationTests(FamilyTreeCase):
                                 {'note': 'x'}, format='json')
         self.assertEqual(resp.status_code, 404)
 
-    # DÉFAUT (rapport, D2) — MediaLinkViewSet.perform_create remplace celui
-    # d'OwnedTreeMixin sans appeler check_tree : la création d'un lien média
-    # n'est soumise à AUCUN contrôle d'écriture.
-    @unittest.expectedFailure
+    # Corrigé (D2) — MediaLinkViewSet.perform_create remplaçait celui du mixin
+    # sans contrôle d'écriture : les trois tests qui suivent étaient rouges.
     def test_le_lecteur_ne_cree_pas_de_lien_media(self):
         data = {'media': self.objects['media'].pk, 'individual': self.objects['_mere'].pk}
         resp = self.carol.post('/api/media-links/', data, format='json')
         self.assertEqual(resp.status_code, 403)
 
-    # DÉFAUT (D2, conséquence) : une invitée en LECTURE change le portrait d'une
-    # personne de l'arbre — le lien primaire qu'elle crée déclasse l'existant.
-    @unittest.expectedFailure
+    # Une invitée en LECTURE changeait le portrait d'une personne de l'arbre.
     def test_le_lecteur_ne_change_pas_le_portrait(self):
         self.carol.post('/api/media-links/', {
             'media': self.objects['media'].pk, 'individual': self.objects['individuals'].pk,
@@ -207,10 +202,8 @@ class CreationTests(FamilyTreeCase):
         self.objects['media-links'].refresh_from_db()
         self.assertTrue(self.objects['media-links'].is_primary)
 
-    # DÉFAUT (D2, conséquence) : un compte sans aucun droit sur l'arbre rattache
-    # un média privé d'autrui à sa propre personne ; la réponse lui donne le
-    # titre du média et son chemin dans storage.
-    @unittest.expectedFailure
+    # Un compte sans aucun droit rattachait un média privé d'autrui à sa propre
+    # personne ; la réponse lui donnait le titre du média et son chemin storage.
     def test_l_etranger_ne_lie_pas_le_media_d_un_arbre_prive(self):
         resp = self.dave.post('/api/media-links/', {
             'media': self.objects['media'].pk, 'individual': self.other_objects['individuals'].pk,
@@ -257,9 +250,9 @@ class ReferencesCroiseesTests(FamilyTreeCase):
                              {'individual': self.objects['individuals'].pk})
         self.assertEqual(resp.status_code, 404)
 
-    # DÉFAUT (rapport, D3) — les sérialiseurs acceptent n'importe quelle clé
-    # primaire pour les clés étrangères secondaires, et _tree_of ne remonte que
-    # par `tree_path`. Chaque cas ci-dessous est accepté (201/200) aujourd'hui.
+    # Corrigé (D3) — les sérialiseurs acceptent n'importe quelle clé primaire
+    # pour les clés étrangères secondaires ; views.check_same_tree les contrôle
+    # toutes. Chacun de ces dix cas était accepté (201) avant le correctif.
     CAS = {
         'conjoint':   ('family-spouses', lambda m, t: {'family': m['_famille2'].pk,
                                                        'individual': t['individuals'].pk}),
@@ -286,15 +279,64 @@ class ReferencesCroiseesTests(FamilyTreeCase):
 
     def _cas(self, nom):
         prefix, build = self.CAS[nom]
+        modele = type(self.objects[prefix])
+        avant = modele.objects.count()
         resp = self.post(prefix, build(self.other_objects, self.objects))
         self.assertIn(resp.status_code, (400, 403), f'{nom} : {resp.status_code}')
+        self.assertEqual(modele.objects.count(), avant)
+
+    def test_meme_refus_en_modification(self):
+        # Dave modifie SES objets pour y glisser une référence à l'arbre d'Alice.
+        mine, theirs = self.other_objects, self.objects
+        cas = {
+            'events': {'individual': theirs['_mere'].pk},
+            'family-spouses': {'individual': theirs['individuals'].pk},
+            'media-links': {'individual': theirs['individuals'].pk},
+            'citations': {'event': theirs['events'].pk},
+            'style-rules': {'style': theirs['node-styles'].pk},
+            'node-layouts': {'style_override': theirs['node-styles'].pk},
+            'sources': {'repository': theirs['repositories'].pk},
+            'enrichment-matches': {'individual': theirs['individuals'].pk},
+        }
+        for prefix, corps in cas.items():
+            with self.subTest(route=prefix):
+                resp = self.dave.patch(f'/api/{prefix}/{mine[prefix].pk}/', corps, format='json')
+                self.assertEqual(resp.status_code, 400, resp.content)
+
+    def test_les_references_du_meme_arbre_restent_permises(self):
+        mine = self.other_objects
+        cas = {
+            'events': {'individual': mine['_mere'].pk},
+            'media-links': {'individual': mine['_enfant'].pk, 'event': mine['events'].pk},
+            'citations': {'individual': mine['_mere'].pk, 'family': mine['families'].pk},
+            'node-layouts': {'style_override': mine['node-styles'].pk},
+            'sources': {'repository': mine['repositories'].pk},
+            'enrichment-matches': {'individual': mine['_mere'].pk},
+        }
+        for prefix, corps in cas.items():
+            with self.subTest(route=prefix):
+                resp = self.dave.patch(f'/api/{prefix}/{mine[prefix].pk}/', corps, format='json')
+                self.assertEqual(resp.status_code, 200, resp.content)
+        resp = self.dave.patch(f'/api/trees/{self.other.pk}/settings/', {
+            'root_individual': mine['_mere'].pk, 'default_node_style': mine['node-styles'].pk},
+            format='json')
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_recherche_enregistree_sur_la_personne_d_un_autre_arbre(self):
+        fournisseur = mock.Mock()
+        fournisseur.search.return_value = [PersonResult(provider='wikitree', external_id='Z-9')]
+        with mock.patch('api.views.get_provider', return_value=fournisseur):
+            resp = self.dave.post('/api/enrich/search/', {
+                'provider': 'wikitree', 'query': {'surname': 'x'}, 'tree': self.other.pk,
+                'save': True, 'individual': self.objects['individuals'].pk}, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(EnrichmentMatch.objects.filter(external_id='Z-9').exists())
 
     def test_les_dix_cas_sont_connus(self):
         self.assertEqual(len(self.CAS), 10)
 
 
 def _defaut(nom):
-    @unittest.expectedFailure
     def test(self):
         self._cas(nom)
     return test
@@ -305,11 +347,11 @@ for _i, _nom in enumerate(ReferencesCroiseesTests.CAS):
 
 
 class ConsequencesDesReferencesCroiseesTests(FamilyTreeCase):
-    """Ce que D3 permet réellement, sur un arbre privé auquel Dave n'a pas accès."""
+    """Ce que D3 permettait, sur un arbre privé auquel Dave n'a pas accès
+    (trois tests rouges avant le correctif)."""
 
-    # Lecture : Dave « marie » une personne de l'arbre d'Alice dans SA famille,
-    # puis lit son nom par /relations/ et le graphe de son propre arbre.
-    @unittest.expectedFailure
+    # Lecture : Dave « mariait » une personne de l'arbre d'Alice dans SA famille,
+    # puis lisait son nom par /relations/.
     def test_le_nom_d_une_personne_d_un_arbre_prive_ne_fuit_pas(self):
         secret = self.objects['individuals']          # « Jean Martin<id> »
         mien = self.other_objects['_mere']
@@ -323,7 +365,6 @@ class ConsequencesDesReferencesCroiseesTests(FamilyTreeCase):
 
     # Écriture : un événement « décès » posé sur la personne d'autrui la fait
     # passer pour décédée dans l'arbre de son propriétaire.
-    @unittest.expectedFailure
     def test_on_ne_declare_pas_decedee_la_personne_d_un_autre_arbre(self):
         cible = self.objects['_mere']
         self.dave.post('/api/events/', {'tree': self.other.pk, 'individual': cible.pk,
@@ -332,8 +373,7 @@ class ConsequencesDesReferencesCroiseesTests(FamilyTreeCase):
         self.assertTrue(cible.is_living)
         self.assertFalse(Event.objects.filter(individual=cible, tag='DEAT').exists())
 
-    # Écriture : les réglages de vue acceptent un individu racine d'un autre arbre.
-    @unittest.expectedFailure
+    # Écriture : les réglages de vue acceptaient un individu racine d'un autre arbre.
     def test_les_reglages_de_vue_restent_dans_l_arbre(self):
         resp = self.dave.patch(f'/api/trees/{self.other.pk}/settings/',
                                {'root_individual': self.objects['individuals'].pk}, format='json')

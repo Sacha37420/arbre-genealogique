@@ -10,7 +10,7 @@ import logging
 
 import requests
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Model, Q
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -177,6 +177,34 @@ class TreeOwnerMixin:
         return share.role if share else 'VIEWER'
 
 
+def check_same_tree(tree: Tree | None, validated: dict) -> None:
+    """
+    Toute référence reçue en entrée doit appartenir au même arbre que la
+    ressource écrite.
+
+    Le contrôle d'écriture (`check_tree`) ne porte que sur l'arbre de la
+    ressource ; or un même corps de requête désigne souvent d'autres objets
+    (la personne d'un événement, le conjoint d'une famille, le style d'une
+    règle…), que les sérialiseurs acceptent par simple clé primaire. Sans cette
+    vérification, on rattachait à SON arbre un objet d'un arbre privé d'autrui
+    — de quoi le lire (relations, graphe) ou l'altérer (un « décès »).
+
+    Générique à dessein : toute valeur validée qui est un arbre, ou un objet
+    portant `tree`, est contrôlée — un champ ajouté demain l'est d'office.
+    """
+    if tree is None:
+        return
+    for field, value in validated.items():
+        if isinstance(value, Tree):
+            other = value.pk
+        elif isinstance(value, Model) and hasattr(value, 'tree_id'):
+            other = value.tree_id
+        else:
+            continue
+        if other != tree.pk:
+            raise ValidationError({field: ['Cet objet n’appartient pas à cet arbre.']})
+
+
 class OwnedTreeMixin(TreeOwnerMixin):
     """
     Restreint le queryset aux objets des arbres visibles par l'utilisateur.
@@ -216,17 +244,29 @@ class OwnedTreeMixin(TreeOwnerMixin):
             obj = getattr(obj, part, None)
         return obj if isinstance(obj, Tree) else None
 
-    def perform_create(self, serializer):
+    def check_write(self, serializer) -> None:
+        """Droit d'écrire dans l'arbre visé, et cohérence des références reçues.
+
+        Point de passage unique de toute création ou modification d'une
+        ressource fille : un `perform_create`/`perform_update` redéfini doit
+        l'appeler (ou appeler `super()`)."""
         tree = self._tree_of(serializer.validated_data)
         if tree is not None:
+            # Interdit aussi de *déplacer* un objet vers l'arbre d'autrui.
             self.check_tree(tree)
+        elif serializer.instance is not None:
+            # Modification qui ne redit pas son arbre : celui de l'objet existant.
+            tree = serializer.instance
+            for part in self.tree_path.split('__'):
+                tree = getattr(tree, part, None)
+        check_same_tree(tree, serializer.validated_data)
+
+    def perform_create(self, serializer):
+        self.check_write(serializer)
         serializer.save()
 
     def perform_update(self, serializer):
-        # Interdit aussi de *déplacer* un objet vers l'arbre d'autrui.
-        tree = self._tree_of(serializer.validated_data)
-        if tree is not None:
-            self.check_tree(tree)
+        self.check_write(serializer)
         serializer.save()
 
 
@@ -396,6 +436,8 @@ class TreeViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
             self.check_tree(tree)
             serializer = TreeViewSettingsSerializer(settings_obj, data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
+            # Individu racine, gabarits et styles par défaut : ceux de CET arbre.
+            check_same_tree(tree, serializer.validated_data)
             serializer.save()
             return Response(serializer.data)
 
@@ -931,10 +973,15 @@ class MediaLinkViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
     tree_path = 'media__tree'
 
     def perform_create(self, serializer):
+        # check_write : sans lui, créer un lien n'était soumis à AUCUN contrôle
+        # d'écriture (un invité en lecture changeait un portrait, un étranger
+        # liait le média d'un arbre privé).
+        self.check_write(serializer)
         link = serializer.save()
         demote_other_photos(link)
 
     def perform_update(self, serializer):
+        self.check_write(serializer)
         # Choisir une photo de la galerie comme portrait doit déclasser l'ancienne.
         with transaction.atomic():
             link = serializer.save()
@@ -1117,7 +1164,10 @@ class ProviderSearchView(APIView):
 
         tree = self._tree(request)
         if tree and request.data.get('save'):
-            self._persist(tree, provider_key, results, request.data.get('individual'))
+            individual_id = request.data.get('individual')
+            if individual_id and not Individual.objects.filter(pk=individual_id, tree=tree).exists():
+                raise ValidationError('Cet individu n’appartient pas à l’arbre.')
+            self._persist(tree, provider_key, results, individual_id)
 
         return Response({
             'provider': provider_key,
