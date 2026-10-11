@@ -6,8 +6,6 @@ doit avoir été émis pour CETTE application, sinon un jeton ``admin-cli`` (cli
 public à mot de passe du realm) suffirait — et (3) le claim ``email``, pivot de
 toute l'autorisation par arbre.
 """
-import unittest
-
 import jwt
 from django.test import override_settings
 from rest_framework.test import APIClient
@@ -167,12 +165,15 @@ class JetonEnParametreTests(FamilyTreeCase):
         resp = bearer(make_token(ALICE, azp='admin-cli')).get(self.url)
         self.assertIn(resp.status_code, REFUS)
 
-    # DÉFAUT (rapport carto-arbre, D1) — api/auth_extra.py revalide la signature,
-    # l'expiration et l'email du jeton passé en « ?token= », mais PAS `azp` : un
-    # jeton obtenu par `admin-cli` (client public à mot de passe du realm) est
-    # accepté sur /api/media/<id>/file/, alors que le même jeton en en-tête est
-    # refusé. CLAUDE.md : « Ne jamais retirer ces deux contrôles. »
-    @unittest.expectedFailure
     def test_jeton_d_un_autre_client_en_parametre_est_refuse(self):
+        # Corrigé (D1) : « ?token= » passe par la même validation que l'en-tête.
+        # Un jeton `admin-cli` (client public à mot de passe du realm) y était accepté.
         resp = self.get(make_token(ALICE, azp='admin-cli'))
         self.assertIn(resp.status_code, REFUS)
+        self.assertIn('autre client', resp.json()['detail'])
+        self.assertEqual(self.storage.calls, [])
+
+    @override_settings(KEYCLOAK_REQUIRED_GROUPS='famille')
+    def test_groupe_requis_applique_aussi_au_parametre(self):
+        self.assertIn(self.get(make_token(ALICE, groups=['amis'])).status_code, REFUS)
+        self.assertEqual(self.get(make_token(ALICE, groups=['famille'])).status_code, 200)

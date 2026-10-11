@@ -47,8 +47,12 @@ class KeycloakJWTAuthentication(BaseAuthentication):
         if not auth_header.startswith('Bearer '):
             return None
 
-        token = auth_header[7:]
+        return self.validate_token(auth_header[7:])
 
+    def validate_token(self, token: str):
+        """Valide un jeton, d'où qu'il vienne (en-tête ou « ?token= ») : signature,
+        expiration, `azp`, groupes, email. Point unique — tout chemin
+        d'authentification doit passer par ici."""
         try:
             client = self._get_jwks_client()
             signing_key = client.get_signing_key_from_jwt(token)
