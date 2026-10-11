@@ -557,12 +557,10 @@ class PartageTests(FamilyTreeCase):
         self.assertEqual(resp.status_code, 502)
         self.assertEqual(TreeShare.objects.get(pk=self.share_carol.pk).role, 'VIEWER')
 
-    # DÉFAUT (rapport, D4) — TreeShareSerializer laisse `tree` modifiable et
-    # perform_update ne contrôle que l'arbre d'ORIGINE du partage : Dave crée un
-    # partage sur son propre arbre, puis le déplace sur l'arbre d'Alice. Il
-    # devient éditeur d'un arbre privé qui ne lui a jamais été partagé.
-    @unittest.expectedFailure
     def test_un_partage_ne_se_deplace_pas_vers_l_arbre_d_autrui(self):
+        # Corrigé (D4) : Dave créait un partage sur son propre arbre puis le
+        # déplaçait sur l'arbre d'Alice, et devenait éditeur d'un arbre privé
+        # qui ne lui avait jamais été partagé.
         mien = self.dave.post('/api/tree-shares/', {
             'tree': self.other.pk, 'email': 'complice@example.org', 'role': 'EDITOR'},
             format='json').json()
@@ -571,6 +569,22 @@ class PartageTests(FamilyTreeCase):
         self.assertIn(resp.status_code, (400, 403), resp.content)
         self.assertFalse(TreeShare.objects.filter(tree=self.tree, email=DAVE).exists())
         self.assertEqual(self.dave.get(f'/api/trees/{self.tree.pk}/').status_code, 404)
+        self.assertNotIn(DAVE, self.storage.members.get(ns(self.tree), {}))
+        # Même refus sans changer l'adresse, en PUT, et même vers un de SES arbres.
+        for corps in ({'tree': self.tree.pk}, {'tree': self.public.pk, 'role': 'EDITOR'}):
+            resp = self.dave.patch(f"/api/tree-shares/{mien['id']}/", corps, format='json')
+            self.assertEqual(resp.status_code, 400)
+        resp = self.dave.put(f"/api/tree-shares/{mien['id']}/", {
+            'tree': self.tree.pk, 'email': DAVE, 'role': 'EDITOR'}, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(TreeShare.objects.get(pk=mien['id']).tree_id, self.other.pk)
+        # Renvoyer le même arbre (ce que fait un formulaire complet) reste permis.
+        resp = self.dave.patch(f"/api/tree-shares/{mien['id']}/",
+                               {'tree': self.other.pk, 'role': 'VIEWER'}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        # … et le propriétaire ne se rétrograde pas en invité de son propre arbre.
+        resp = self.dave.patch(f"/api/tree-shares/{mien['id']}/", {'email': DAVE}, format='json')
+        self.assertEqual(resp.status_code, 400)
 
 
 class _FauxFournisseur:

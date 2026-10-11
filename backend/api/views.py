@@ -613,6 +613,14 @@ class TreeShareViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self.check_owner(serializer.instance.tree)
+        # Un partage ne change jamais d'arbre : sans cela, le propriétaire d'un
+        # arbre quelconque déplaçait son partage sur l'arbre d'autrui et s'y
+        # donnait l'édition (seul l'arbre d'ORIGINE est contrôlé ci-dessus).
+        cible = serializer.validated_data.get('tree')
+        if cible is not None and cible.pk != serializer.instance.tree_id:
+            raise ValidationError('Un partage ne peut pas être déplacé vers un autre arbre.')
+        if serializer.validated_data.get('email') == serializer.instance.tree.owner_email:
+            raise ValidationError('Cet arbre vous appartient déjà.')
         try:
             with transaction.atomic():
                 serializer.save()
