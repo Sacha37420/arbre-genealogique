@@ -924,7 +924,13 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def _tree_from(self, tree_id) -> Tree:
-        tree = Tree.objects.filter(pk=tree_id, owner_email=self.request.user.email).first()
+        # Même règle que l'envoi en base64 (check_write) : le propriétaire et les
+        # invités « éditeur ». Le frontend n'envoie qu'en multipart — réservé au
+        # propriétaire, ce chemin privait les éditeurs de tout ajout de photo.
+        try:
+            tree = self.editable_trees().filter(pk=tree_id).first()
+        except (TypeError, ValueError):
+            tree = None
         if tree is None:
             raise ValidationError('Arbre inconnu ou non autorisé.')
         return tree

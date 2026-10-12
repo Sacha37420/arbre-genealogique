@@ -730,6 +730,23 @@ class MediaAutorisationTests(FamilyTreeCase):
     def fichier(self):
         return SimpleUploadedFile('photo.png', b'\x89PNG-octets', content_type='image/png')
 
+    def test_l_editeur_envoie_un_fichier_comme_le_proprietaire(self):
+        # Le frontend n'envoie qu'en multipart : réservé au propriétaire, ce chemin
+        # privait les éditeurs de tout ajout de photo (le base64 leur était ouvert).
+        for nom in ('alice', 'bob'):
+            with self.subTest(acteur=nom):
+                resp = getattr(self, nom).post('/api/media/', {
+                    'tree': self.tree.pk, 'file': self.fichier(),
+                    'individual': self.objects['_mere'].pk}, format='multipart')
+                self.assertEqual(resp.status_code, 201, resp.content)
+                media = MediaObject.objects.get(pk=resp.json()['id'])
+                self.assertEqual(self.storage.files[ns(self.tree)][media.storage_path],
+                                 b'\x89PNG-octets')
+        # Même règle des deux côtés : le base64 aussi.
+        resp = self.bob.post('/api/media/', {'tree': self.tree.pk, 'data_base64': 'QUJD'},
+                             format='json')
+        self.assertEqual(resp.status_code, 201)
+
     def test_envoi_de_fichier_dans_l_arbre_d_autrui_refuse_sans_rien_deposer(self):
         for nom in ('carol', 'dave'):
             for arbre in (self.tree, self.public):
