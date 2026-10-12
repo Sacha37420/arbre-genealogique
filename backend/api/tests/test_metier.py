@@ -492,6 +492,24 @@ class GedcomTests(LabTestCase):
         self.assertEqual(trace.status, 'FAILED')
         self.assertTrue(trace.log)
 
+    def test_reimporter_le_meme_fichier_est_refuse_sans_rien_abimer(self):
+        # Comportement constaté, pas un défaut : un identifiant GEDCOM (@I1@) est
+        # unique dans un arbre, donc un second import du même fichier est refusé
+        # en 400 — ni 500, ni doublon, ni import partiel — et tracé comme échec.
+        self.assertEqual(self.importer(GEDCOM).status_code, 201)
+        avant = (Individual.objects.count(), Family.objects.count(), Event.objects.count(),
+                 Place.objects.count())
+        resp = self.importer(GEDCOM)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Import impossible', resp.json()[0])
+        self.assertEqual((Individual.objects.count(), Family.objects.count(),
+                          Event.objects.count(), Place.objects.count()), avant)
+        self.assertEqual(sorted(ImportJob.objects.filter(tree=self.tree)
+                                .values_list('status', flat=True)), ['DONE', 'FAILED'])
+        # Le même fichier s'importe sans difficulté dans un AUTRE arbre.
+        autre = Tree.objects.create(name='Autre', owner_email=ALICE)
+        self.assertEqual(self.importer(GEDCOM, autre).status_code, 201)
+
     def test_contenu_vide_refuse_sans_trace(self):
         self.assertEqual(self.importer('  \n').status_code, 400)
         self.assertFalse(ImportJob.objects.filter(tree=self.tree).exists())

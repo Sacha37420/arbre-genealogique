@@ -752,15 +752,101 @@ class MediaAutorisationTests(FamilyTreeCase):
         # Le contrôle précède le dépôt : aucun octet n'est parti vers storage.
         self.assertEqual(self.storage.writes(), [])
 
-    def test_l_existence_d_un_lieu_ne_se_devine_pas(self):
-        # Constat consigné au rapport (O1) : un nom déjà pris répond 400 « unique
-        # set » avant le 403 — un étranger peut ainsi tester la présence d'un
-        # nom de lieu dans un arbre privé. Rien n'est créé dans les deux cas.
-        for nom in ('Tours, Indre-et-Loire, France', 'Inconnu'):
-            resp = self.dave.post('/api/places/', {'tree': self.tree.pk, 'name': nom},
-                                  format='json')
-            self.assertIn(resp.status_code, (400, 403))
+
+class RienNeSeDevineTests(FamilyTreeCase):
+    """Une réponse ne révèle pas l'existence d'une donnée d'un arbre que
+    l'appelant ne peut pas lire : même statut, même corps, que la donnée existe
+    ou non. Dave n'a aucun droit sur `tree` ; 999999 n'existe pas."""
+
+    ABSENT = 999999
+
+    def paire(self, methode, url, present, absent):
+        """Deux requêtes identiques, sauf que l'une vise une donnée existante."""
+        a = getattr(self.dave, methode)(url, present, format='json')
+        b = getattr(self.dave, methode)(url, absent, format='json')
+        self.assertEqual(a.status_code, b.status_code, (a.content, b.content))
+        return a, b
+
+    def test_nom_de_lieu_ou_cle_de_champ_deja_pris(self):
+        # Un nom déjà pris répondait 400 « unique set », un nom libre 403.
+        a, b = self.paire('post', '/api/places/',
+                          {'tree': self.tree.pk, 'name': 'Tours, Indre-et-Loire, France'},
+                          {'tree': self.tree.pk, 'name': 'Inconnu'})
+        self.assertEqual((a.status_code, a.content), (403, b.content))
+        a, b = self.paire('post', '/api/custom-fields/',
+                          {'tree': self.tree.pk, 'key': 'metier', 'label': 'x'},
+                          {'tree': self.tree.pk, 'key': 'libre', 'label': 'x'})
+        self.assertEqual((a.status_code, a.content), (403, b.content))
+        # … y compris en déplaçant un de SES objets vers l'arbre d'autrui.
+        url = f"/api/places/{self.other_objects['places'].pk}/"
+        a, b = self.paire('patch', url,
+                          {'tree': self.tree.pk, 'name': 'Tours, Indre-et-Loire, France'},
+                          {'tree': self.tree.pk, 'name': 'Inconnu'})
+        self.assertEqual((a.status_code, a.content), (403, b.content))
         self.assertEqual(self.tree.places.count(), 1)
+
+    def test_arbre_ou_parent_existant_ou_non(self):
+        cas = [
+            ('/api/individuals/', 'tree', self.tree.pk, {}),
+            ('/api/places/', 'tree', self.tree.pk, {'name': 'x'}),
+            ('/api/names/', 'individual', self.objects['individuals'].pk, {'givn': 'x'}),
+            ('/api/family-spouses/', 'family', self.objects['families'].pk,
+             {'individual': self.other_objects['individuals'].pk}),
+            ('/api/media-links/', 'media', self.objects['media'].pk, {}),
+            ('/api/citations/', 'source', self.objects['sources'].pk, {}),
+            ('/api/node-layouts/', 'individual', self.objects['_mere'].pk, {}),
+            ('/api/tree-shares/', 'tree', self.tree.pk, {'email': 'x@example.org'}),
+        ]
+        for url, champ, present, reste in cas:
+            with self.subTest(route=url):
+                a, b = self.paire('post', url, {champ: present, **reste},
+                                  {champ: self.ABSENT, **reste})
+                self.assertEqual(a.status_code, 403)
+                self.assertEqual(a.content, b.content)
+
+    def test_reference_secondaire_existante_ou_non(self):
+        # Dans SON arbre, Dave désigne un objet d'un arbre privé, ou un identifiant
+        # qui n'existe pas : même refus, mot pour mot (à l'identifiant près).
+        mine, theirs = self.other_objects, self.objects
+        cas = [
+            ('/api/events/', {'tree': self.other.pk, 'tag': 'DEAT'}, 'individual',
+             theirs['_mere'].pk),
+            ('/api/family-spouses/', {'family': mine['_famille2'].pk}, 'individual',
+             theirs['individuals'].pk),
+            ('/api/style-rules/', {'tree': self.other.pk, 'name': 'r'}, 'style',
+             theirs['node-styles'].pk),
+            ('/api/sources/', {'tree': self.other.pk, 'title': 's'}, 'repository',
+             theirs['repositories'].pk),
+        ]
+        for url, corps, champ, present in cas:
+            with self.subTest(route=url):
+                a, b = self.paire('post', url, {**corps, champ: present},
+                                  {**corps, champ: self.ABSENT})
+                self.assertEqual(a.status_code, 400)
+                self.assertEqual(a.content.decode().replace(str(present), 'N'),
+                                 b.content.decode().replace(str(self.ABSENT), 'N'))
+
+    def test_detail_existant_ou_non(self):
+        for prefix in ROUTES:
+            with self.subTest(route=prefix):
+                a = self.dave.get(f'/api/{prefix}/{self.objects[prefix].pk}/')
+                b = self.dave.get(f'/api/{prefix}/{self.ABSENT}/')
+                self.assertEqual((a.status_code, a.content), (404, b.content))
+        a = self.dave.get(f'/api/trees/{self.tree.pk}/graph/')
+        b = self.dave.get(f'/api/trees/{self.ABSENT}/graph/')
+        self.assertEqual((a.status_code, a.content), (404, b.content))
+
+    def test_import_et_envoi_de_media(self):
+        for present in (self.tree.pk, self.ABSENT):
+            resp = self.dave.post('/api/media/', {
+                'tree': present, 'file': SimpleUploadedFile('p.png', b'x', content_type='image/png')},
+                format='multipart')
+            self.assertEqual(resp.status_code, 400)
+            self.assertEqual(resp.json(), ['Arbre inconnu ou non autorisé.'])
+            resp = self.dave.post('/api/enrich/import/', {
+                'provider': 'wikitree', 'external_id': 'X', 'tree': present}, format='json')
+            self.assertEqual(resp.status_code, 403)
+            self.assertEqual(resp.json()['detail'], 'Arbre inconnu ou non autorisé.')
 
     def test_contenu_du_media(self):
         url = f"/api/media/{self.objects['media'].pk}/file/"

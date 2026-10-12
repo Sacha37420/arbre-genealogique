@@ -202,7 +202,10 @@ def check_same_tree(tree: Tree | None, validated: dict) -> None:
         else:
             continue
         if other != tree.pk:
-            raise ValidationError({field: ['Cet objet n’appartient pas à cet arbre.']})
+            # Mot pour mot la réponse de DRF à un identifiant inexistant : le
+            # refus ne doit pas dire si l'objet existe dans un arbre que
+            # l'appelant ne peut pas lire.
+            raise ValidationError({field: [f'Invalid pk "{value.pk}" - object does not exist.']})
 
 
 class OwnedTreeMixin(TreeOwnerMixin):
@@ -243,6 +246,38 @@ class OwnedTreeMixin(TreeOwnerMixin):
         for part in parts[1:]:
             obj = getattr(obj, part, None)
         return obj if isinstance(obj, Tree) else None
+
+    def check_target(self, data) -> None:
+        """
+        Refuse AVANT toute validation une écriture visant un arbre où l'appelant
+        n'écrit pas — ou un arbre, un parent, qui n'existe pas : même réponse.
+
+        La validation du corps parle de ce que l'arbre contient déjà (« ce nom
+        de lieu est pris », « cet identifiant n'existe pas ») : passée avant le
+        contrôle d'accès, elle renseignait n'importe qui sur un arbre privé.
+        """
+        parts = self.tree_path.split('__')
+        raw = data.get(parts[0]) if hasattr(data, 'get') else None
+        if raw in (None, ''):
+            return
+        related = self.queryset.model._meta.get_field(parts[0]).related_model
+        try:
+            obj = related.objects.filter(pk=raw).first()
+        except (TypeError, ValueError):
+            return  # pas un identifiant : la validation le dira (400)
+        for part in parts[1:]:
+            obj = getattr(obj, part, None)
+        if obj is None or not self.editable_trees().filter(pk=obj.pk).exists():
+            raise PermissionDenied("Vous n’avez pas le droit de modifier cet arbre.")
+
+    def create(self, request, *args, **kwargs):
+        self.check_target(request.data)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        self.get_object()  # 404 d'abord si l'objet lui-même est hors de portée
+        self.check_target(request.data)
+        return super().update(request, *args, **kwargs)
 
     def check_write(self, serializer) -> None:
         """Droit d'écrire dans l'arbre visé, et cohérence des références reçues.
@@ -622,6 +657,17 @@ class TreeShareViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
         return qs
 
     def create(self, request, *args, **kwargs):
+        # Avant la validation, et sans distinguer « arbre d'autrui » d'« arbre
+        # inexistant » : la réponse ne dit pas si l'identifiant existe.
+        raw = request.data.get('tree')
+        if raw not in (None, ''):
+            try:
+                owned = self.owned_trees().filter(pk=raw).exists()
+            except (TypeError, ValueError):
+                owned = True  # pas un identifiant : la validation le dira (400)
+            if not owned:
+                raise PermissionDenied("Seul le propriétaire de l’arbre peut faire cela.")
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
