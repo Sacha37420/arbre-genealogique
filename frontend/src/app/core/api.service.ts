@@ -2,7 +2,6 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
 
-import { KeycloakService } from './keycloak.service';
 import {
   CardTemplate,
   EventRecord,
@@ -26,33 +25,25 @@ interface EnvWindow {
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private http = inject(HttpClient);
-  private kc = inject(KeycloakService);
 
   private get base(): string {
     return (window as unknown as EnvWindow).__env?.apiUrl ?? 'http://localhost:8090';
   }
 
   /**
-   * URL d'une photo, utilisable telle quelle dans une balise <img>.
+   * Adresse d'une photo, SANS jeton : à passer à `[appAuthSrc]` (lecture par
+   * HttpClient + Blob, jeton dans l'en-tête — `core/auth-blob.service.ts`),
+   * jamais à un `[src]` brut.
    *
-   * Le JWT part en paramètre d'URL : une balise <img> ne peut pas porter d'en-tête
-   * Authorization, et l'intercepteur ne s'applique qu'aux requêtes HttpClient.
-   *
-   * Deux formes possibles depuis que MediaObjectSerializer/graph.py peuvent
-   * renvoyer une URL storage directe (arbre privé, cf. storage_client.media_url
-   * côté backend) plutôt que le chemin du proxy (/api/media/<id>/file/, arbre
-   * public ou repli dev sans DOMAIN) : dans les deux cas le `?token=` doit être
-   * ajouté — storage lit le même fallback que ce backend (KeycloakQueryTokenAuthentication
-   * / storage/backend/api/authentication.py), pas seulement le proxy de cette app.
+   * Deux formes : une URL storage directe (arbre privé, cf.
+   * `storage_client.media_url` côté backend) ou le chemin du proxy
+   * `/api/media/<id>/file/` (arbre public, repli sans DOMAIN), préfixé ici par
+   * la base de l'API. Un média externe garde son adresse d'origine.
    */
   mediaUrl(path: string | null): string {
     if (!path) return '';
-    const token = this.kc.getToken();
-    if (path.startsWith('http')) {
-      if (!token) return path;
-      return `${path}${path.includes('?') ? '&' : '?'}token=${token}`;
-    }
-    return `${this.base}${path}${token ? `?token=${token}` : ''}`;
+    if (/^https?:\/\//.test(path)) return path;
+    return `${this.base}${path}`;
   }
 
   // ── Arbres ────────────────────────────────────────────────────────────────
@@ -118,13 +109,11 @@ export class ApiService {
     return this.http.get(`${this.base}/api/trees/${treeId}/gedcom/`, { responseType: 'blob' });
   }
 
-  geocodeTree(
-    treeId: number,
-    credentials: Record<string, string> = {},
-  ): Observable<{ geocoded: number; not_found: number }> {
+  /** La clé Geoapify éventuelle est lue par le serveur dans le coffre de l'utilisateur. */
+  geocodeTree(treeId: number): Observable<{ geocoded: number; not_found: number }> {
     return this.http.post<{ geocoded: number; not_found: number }>(
       `${this.base}/api/trees/${treeId}/geocode/`,
-      { credentials },
+      {},
     );
   }
 
@@ -290,7 +279,22 @@ export class ApiService {
     return this.http.get<Provider[]>(`${this.base}/api/enrich/providers/`);
   }
 
-  /** Les clés d'API partent dans le corps de la requête ; le serveur ne les conserve pas. */
+  /** Coffre : `{"<champ>_configured": bool}` — jamais la valeur. */
+  getProviderCredentials(provider: string): Observable<Record<string, boolean>> {
+    return this.http.get<Record<string, boolean>>(
+      `${this.base}/api/provider-credentials/${encodeURIComponent(provider)}/`,
+    );
+  }
+
+  /** Dépose (ou, avec une chaîne vide, oublie) des clés dans le coffre. */
+  putProviderCredentials(provider: string, body: Record<string, string>): Observable<void> {
+    return this.http.put<void>(
+      `${this.base}/api/provider-credentials/${encodeURIComponent(provider)}/`,
+      body,
+    );
+  }
+
+  /** Aucune clé d'API dans la requête : le serveur lit le coffre de l'utilisateur. */
   searchProvider(
     payload: SearchPayload,
   ): Observable<{ provider: string; count: number; results: ProviderResult[] }> {
@@ -300,15 +304,10 @@ export class ApiService {
     );
   }
 
-  fetchProvider(
-    provider: string,
-    externalId: string,
-    credentials: Record<string, string> = {},
-  ): Observable<ProviderResult> {
+  fetchProvider(provider: string, externalId: string): Observable<ProviderResult> {
     return this.http.post<ProviderResult>(`${this.base}/api/enrich/fetch/`, {
       provider,
       external_id: externalId,
-      credentials,
     });
   }
 
@@ -319,7 +318,6 @@ export class ApiService {
     target?: number | null;
     with_relatives?: boolean;
     with_photo?: boolean;
-    credentials?: Record<string, string>;
   }): Observable<unknown> {
     return this.http.post(`${this.base}/api/enrich/import/`, payload);
   }

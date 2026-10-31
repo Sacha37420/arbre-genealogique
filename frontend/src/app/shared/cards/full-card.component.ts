@@ -5,6 +5,7 @@ import { ApiService } from '../../core/api.service';
 import { CardTemplate, PersonCard, Timeline } from '../../core/models';
 import { cropStyle, initials, resolveFields } from './card-fields';
 import { TimelineComponent } from './timeline.component';
+import { AuthSrcDirective } from '../auth-src.directive';
 
 /**
  * La grande carte, ouverte au clic sur une mini-carte.
@@ -17,7 +18,7 @@ import { TimelineComponent } from './timeline.component';
 @Component({
   selector: 'app-full-card',
   standalone: true,
-  imports: [NgStyle, TimelineComponent],
+  imports: [NgStyle, TimelineComponent, AuthSrcDirective],
   styleUrl: './full-card.component.scss',
   template: `
     <article class="full" [style.background]="template()?.background_color || '#fff'">
@@ -25,7 +26,7 @@ import { TimelineComponent } from './timeline.component';
         @if (template()?.photo_position !== 'NONE') {
           <div class="photo" [ngStyle]="photoStyle()">
             @if (card().photo_url) {
-              <img [src]="photoSrc()" [alt]="card().full_name" [ngStyle]="crop()" />
+              <img [appAuthSrc]="photoSrc()" [alt]="card().full_name" [ngStyle]="crop()" />
             } @else if (template()?.photo_placeholder === 'initials') {
               <span class="initials" [style.color]="card().style.accent_color">{{ initials() }}</span>
             } @else {

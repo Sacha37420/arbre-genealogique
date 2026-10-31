@@ -279,7 +279,6 @@ export interface SearchPayload {
     text?: string;
     limit?: number;
   };
-  credentials?: Record<string, string>;
   save?: boolean;
 }
 

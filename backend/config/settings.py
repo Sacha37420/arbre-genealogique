@@ -8,6 +8,10 @@ from decouple import config
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-arbre_genealogique-change-in-production')
 DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
+# Clé Fernet du coffre des clés d'API des fournisseurs (api/fields.py). Sans
+# valeur par défaut, à dessein : une clé de repli chiffrerait le coffre sous un
+# secret public. La perdre rend le coffre illisible (chacun ressaisit sa clé).
+VAULT_ENCRYPTION_KEY = config('VAULT_ENCRYPTION_KEY')
 
 # ── Reverse proxy (Caddy) ──────────────────────────────────────────────────────
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

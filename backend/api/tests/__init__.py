@@ -5,7 +5,7 @@ nécessaire : Keycloak (JWKS), ``storage`` et les fournisseurs généalogiques s
 simulés — voir ``helpers.py``.
 
     test_serrure.py       Verrou 2 : jetons RS256 réels contre la classe
-                          d'authentification réelle (en-tête et « ?token= »).
+                          d'authentification réelle (en-tête seul ; « ?token= » refusé).
     test_autorisation.py  Qui lit, modifie, supprime quoi : propriétaire,
                           éditeur, lecteur, étranger, arbre public — sur chaque
                           ressource, les partages, les imports.

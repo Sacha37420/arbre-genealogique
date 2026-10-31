@@ -25,7 +25,7 @@ réimporte dans Gramps, Ancestry, Geneanet ou webtrees.
 | événements/attributs | `Event` | `BIRT`, `DEAT`, `MARR`, `OCCU`, `RESI`… + `EVEN`/`FACT` pour tout le reste |
 | `PLAC` | `Place` | Lieu hiérarchisé, géocodable (latitude/longitude) |
 | `SOUR` / `REPO` | `Source`, `Repository`, `Citation` | Sources, dépôts, citations avec fiabilité (`QUAY` 0–3) |
-| `OBJE` | `MediaObject` + `MediaLink` | Photos **stockées en base** (`BinaryField`), avec cadrage `CROP` |
+| `OBJE` | `MediaObject` + `MediaLink` | Photos rangées dans **`storage`** (service de fichiers du lab, un partage par arbre dont les membres suivent les partages de l'arbre — `api/storage_client.py`), avec cadrage `CROP`. En base : le seul chemin (`storage_path`) |
 | `SNOTE` | `SharedNote` | Notes partagées |
 | `ASSO` | `Association` | Liens non familiaux : parrain, témoin, voisin… |
 
@@ -51,14 +51,20 @@ GEDCOM décrit les faits, pas leur mise en scène. S'y ajoutent donc :
 | `TreeViewSettings` | Algorithme de placement, orientation, espacement, zoom, styles par défaut |
 | `CustomFieldDef` | Champs définis par l'utilisateur, au-delà de GEDCOM |
 | `EnrichmentMatch` | Candidats venus des sources externes, à accepter ou rejeter |
+| `TreeShare` | Partage d'un arbre par email : rôle « lecture » ou « éditeur » ; le propriétaire seul gère les partages et supprime l'arbre |
+| `ProviderCredential` | Coffre : clé d'API d'un fournisseur, par utilisateur, chiffrée au repos (`VAULT_ENCRYPTION_KEY`) |
 
 ---
 
 ## 2. Sources externes (`/api/enrich/*`)
 
-**Les clés d'API ne sont jamais stockées côté serveur.** Elles accompagnent chaque
-requête (`credentials` dans le corps, ou en-tête `X-Provider-Key`) ; le backend les
-relaie au fournisseur et les oublie. Côté navigateur, elles restent en `localStorage`.
+**Les clés d'API sont dans un coffre du serveur**, chiffrées au repos (Fernet,
+`VAULT_ENCRYPTION_KEY` du `.env`), une par utilisateur et par fournisseur. Le
+navigateur les dépose par `PUT /api/provider-credentials/<fournisseur>/`
+(`{"access_token": "…"}`, chaîne vide = oublier) ; `GET` ne rend que
+`{"access_token_configured": true|false}`, jamais la valeur. Les appels aux
+fournisseurs lisent le coffre de l'utilisateur connecté ; une clé envoyée dans la
+requête est ignorée. Rien n'est gardé dans le `localStorage` du navigateur.
 
 | Source | Clé | Couverture |
 |---|---|---|

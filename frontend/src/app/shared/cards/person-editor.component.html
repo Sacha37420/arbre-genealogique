@@ -85,7 +85,7 @@
                 [title]="photo.is_primary ? 'Portrait actuel' : 'Faire de cette photo le portrait'"
                 (click)="choosePhoto(photo)"
               >
-                <img [src]="photoSrc(photo)" [alt]="photo.title || 'Photo'" />
+                <img [appAuthSrc]="photoSrc(photo)" [alt]="photo.title || 'Photo'" />
                 @if (photo.is_primary) {
                   <span class="badge">Portrait</span>
                 }

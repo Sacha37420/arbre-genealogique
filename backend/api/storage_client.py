@@ -58,8 +58,8 @@ cette app ». Inventer un tel groupe serait un mécanisme d'infra non prévu par
 le lab (cf. CLAUDE.md, « Partage lié à un groupe Keycloak ») : ce module ne le
 fait pas. Pour un arbre public, ``media_url`` renvoie donc toujours l'URL du
 proxy (``MediaObjectViewSet.file``, authentifié par n'importe quel compte du
-realm grâce à ``KeycloakQueryTokenAuthentication`` — la même barrière que les
-arbres privés avant cette migration). Voir le rapport de migration pour la
+realm par l'en-tête ``Authorization: Bearer`` — le frontend charge l'image
+par HttpClient, jamais par un jeton en paramètre d'URL). Voir le rapport de migration pour la
 discussion complète de ce choix.
 """
 from __future__ import annotations

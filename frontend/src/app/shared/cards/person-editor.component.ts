@@ -20,6 +20,7 @@ import {
 } from '../../core/models';
 import { describeError } from '../../core/tree-store';
 import { formatGedcomDate } from './card-fields';
+import { AuthSrcDirective } from '../auth-src.directive';
 
 /**
  * Un événement en cours d'édition.
@@ -65,7 +66,7 @@ let tempId = -1;
 @Component({
   selector: 'app-person-editor',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, AuthSrcDirective],
   templateUrl: './person-editor.component.html',
   styleUrl: './person-editor.component.scss',
 })

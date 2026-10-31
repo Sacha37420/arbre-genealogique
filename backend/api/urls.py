@@ -23,6 +23,7 @@ from .views import (
     PlaceViewSet,
     ProviderFetchView,
     ProviderImportView,
+    ProviderCredentialView,
     ProviderListView,
     ProviderSearchView,
     RepositoryViewSet,
@@ -68,8 +69,10 @@ router.register('import-jobs', ImportJobViewSet)
 urlpatterns = [
     path('me/', MeView.as_view()),
 
-    # Les clés d'API voyagent dans le corps de ces trois requêtes (« credentials »)
-    # ou dans l'en-tête X-Provider-Key. Rien n'est stocké côté serveur.
+    # Les clés d'API sont dans le coffre du serveur (chiffrées, par utilisateur) :
+    # PUT pour déposer, GET ne rend que « <champ>_configured ». Les trois appels
+    # aux fournisseurs lisent le coffre ; une clé envoyée dans la requête est ignorée.
+    path('provider-credentials/<str:provider>/', ProviderCredentialView.as_view()),
     path('enrich/providers/', ProviderListView.as_view()),
     path('enrich/search/', ProviderSearchView.as_view()),
     path('enrich/fetch/', ProviderFetchView.as_view()),

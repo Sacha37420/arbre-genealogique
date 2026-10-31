@@ -526,12 +526,15 @@ class GeocodageTests(FamilyTreeCase):
         Place.objects.create(tree=self.tree, name='Déjà fait', latitude=1, longitude=2)
         reponses = {'Tours, Indre-et-Loire, France': {'latitude': 47.39, 'longitude': 0.69,
                                                       'provider': 'nominatim'}}
+        # La clé vient du coffre de Bob (celui qui géocode) ; celle du corps est ignorée.
+        self.assertEqual(self.bob.put('/api/provider-credentials/nominatim/',
+                                      {'geoapify_key': 'k-coffre'}, format='json').status_code, 204)
         with mock.patch('api.views.Geocoder') as geocoder:
             geocoder.return_value.geocode.side_effect = lambda nom: reponses.get(nom)
             resp = self.bob.post(f'/api/trees/{self.tree.pk}/geocode/',
-                                 {'credentials': {'geoapify_key': 'k'}}, format='json')
+                                 {'credentials': {'geoapify_key': 'k-corps'}}, format='json')
         self.assertEqual(resp.json(), {'geocoded': 1, 'not_found': 1})
-        self.assertEqual(geocoder.call_args[0][0], {'geoapify_key': 'k'})
+        self.assertEqual(geocoder.call_args[0][0], {'geoapify_key': 'k-coffre'})
         self.assertEqual(geocoder.return_value.geocode.call_count, 2)     # pas « Déjà fait »
         tours = Place.objects.get(pk=self.objects['places'].pk)
         self.assertEqual((float(tours.latitude), tours.geocode_provider), (47.39, 'nominatim'))

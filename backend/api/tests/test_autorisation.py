@@ -696,16 +696,17 @@ class EnrichissementTests(FamilyTreeCase):
         self.assertEqual(self.fournisseur.appels[0][1].limit, 50)     # plafond serveur
         self.assertFalse(EnrichmentMatch.objects.filter(external_id='Clemens-1').exists())
 
-    def test_les_cles_d_api_ne_sont_jamais_enregistrees(self):
+    def test_les_cles_venues_de_la_requete_sont_ignorees(self):
+        # Corps « credentials » et en-tête X-Provider-Key ne sont plus lus : le
+        # fournisseur ne reçoit que le coffre d'Alice (vide ici), et rien de la
+        # requête ne finit dans les candidats enregistrés.
         self.alice.post('/api/enrich/search/', {
             'provider': 'wikitree', 'query': {'surname': 'Clemens'}, 'tree': self.tree.pk,
             'save': True, 'credentials': {'access_token': 's3cret-jeton'}},
             format='json', HTTP_X_PROVIDER_KEY='s3cret-entete')
+        self.assertEqual(self.get_provider.call_args[0][1], {})
         candidat = EnrichmentMatch.objects.get(tree=self.tree, external_id='Clemens-1')
         self.assertNotIn('s3cret', str(candidat.payload))
-        # … mais elles sont bien passées au fournisseur, y compris par l'en-tête.
-        self.assertEqual(self.get_provider.call_args[0][1],
-                         {'access_token': 's3cret-jeton', 'api_key': 's3cret-entete'})
         lu = self.alice.get('/api/enrichment-matches/').content.decode()
         self.assertNotIn('s3cret', lu)
 

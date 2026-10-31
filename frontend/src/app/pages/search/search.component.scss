@@ -222,6 +222,16 @@ h2 {
   }
 }
 
+.row > .state {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--text-mute);
+
+  &.on {
+    color: var(--accent);
+  }
+}
+
 .hint {
   font-size: 0.76rem;
   color: var(--text-mute);

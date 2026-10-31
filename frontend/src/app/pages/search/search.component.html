@@ -66,20 +66,39 @@
             <div class="key-block">
               <div class="key-head">
                 <strong>{{ item.label }}</strong>
-                <button type="button" class="link" (click)="forgetKeys(item.key)">Oublier</button>
+                <button
+                  type="button"
+                  class="link"
+                  [disabled]="savingKey() === item.key"
+                  (click)="forgetKeys(item)"
+                >
+                  Oublier
+                </button>
               </div>
 
-              @for (field of item.required_credentials.concat(item.optional_credentials ?? []); track field) {
+              @for (field of fieldsOf(item); track field) {
                 <label class="row">
                   <span>{{ field }}</span>
+                  <span class="state" [class.on]="isConfigured(item.key, field)">
+                    {{ isConfigured(item.key, field) ? 'configurée' : 'non configurée' }}
+                  </span>
                   <input
                     type="password"
                     class="input"
                     autocomplete="off"
-                    [ngModel]="credentialValue(item.key, field)"
-                    (ngModelChange)="setCredential(item.key, field, $event)"
-                    [placeholder]="item.requires_key ? 'Collez la clé ici' : 'Facultatif'"
+                    [ngModel]="draft(item.key, field)"
+                    (ngModelChange)="setDraft(item.key, field, $event)"
+                    (keyup.enter)="saveCredential(item.key, field)"
+                    [placeholder]="isConfigured(item.key, field) ? 'Remplacer la clé' : (item.requires_key ? 'Collez la clé ici' : 'Facultatif')"
                   />
+                  <button
+                    type="button"
+                    class="btn ghost"
+                    [disabled]="!draft(item.key, field).trim() || savingKey() === item.key"
+                    (click)="saveCredential(item.key, field)"
+                  >
+                    Enregistrer
+                  </button>
                 </label>
               }
             </div>
@@ -87,9 +106,9 @@
         }
 
         <p class="hint">
-          Ces clés sont stockées dans le stockage local de ce navigateur uniquement.
-          Elles sont transmises au serveur à chaque requête, qui les relaie au fournisseur
-          sans les enregistrer.
+          Les clés sont enregistrées sur le serveur, chiffrées, à votre nom seul. Elles ne
+          sont jamais réaffichées ni gardées dans ce navigateur : le serveur les utilise
+          lui-même pour interroger le fournisseur. « Oublier » les efface.
         </p>
       </div>
     }

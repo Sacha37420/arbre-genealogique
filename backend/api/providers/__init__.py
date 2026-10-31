@@ -2,7 +2,8 @@
 Registre des fournisseurs externes.
 
 Ajouter une source revient à écrire une classe Provider et à l'inscrire ici :
-les endpoints /api/enrich/* la découvrent automatiquement, et l'interface affiche
+les endpoints /api/enrich/* la découvrent automatiquement, le coffre
+(/api/provider-credentials/<clé>/) accepte ses champs, et l'interface affiche
 son formulaire de clé sans changement côté front.
 """
 from .base import PersonResult, Provider, ProviderError, Relative, SearchQuery
@@ -38,11 +39,25 @@ def get_provider(key: str, credentials: dict | None = None) -> Provider:
     return cls(credentials)
 
 
+def credential_fields(key: str) -> list[str] | None:
+    """Champs que le coffre accepte pour ce fournisseur (obligatoires puis
+    facultatifs, comme les affiche l'interface) ; None si le fournisseur est
+    inconnu. Le géocodeur (« nominatim ») n'a qu'une clé facultative,
+    « geoapify_key »."""
+    if key == Geocoder.key:
+        described = Geocoder.describe()
+    elif key in PROVIDERS:
+        described = PROVIDERS[key].describe()
+    else:
+        return None
+    return list(described['required_credentials']) + list(described.get('optional_credentials', []))
+
+
 def describe_all() -> list[dict]:
     return [cls.describe() for cls in PROVIDERS.values()] + [Geocoder.describe()]
 
 
 __all__ = [
-    'PROVIDERS', 'get_provider', 'describe_all', 'Geocoder',
+    'PROVIDERS', 'get_provider', 'describe_all', 'credential_fields', 'Geocoder',
     'Provider', 'ProviderError', 'PersonResult', 'Relative', 'SearchQuery',
 ]

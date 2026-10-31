@@ -21,6 +21,8 @@ from django.db import models
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 
+from .fields import EncryptedTextField
+
 logger = logging.getLogger(__name__)
 
 
@@ -223,6 +225,35 @@ class UserRecord(models.Model):
 
     def __str__(self) -> str:
         return self.display_name or self.email
+
+
+class ProviderCredential(models.Model):
+    """Une clé d'API d'un fournisseur externe, au nom d'un utilisateur — le coffre.
+
+    Clé = email (comme `Tree.owner_email`) × fournisseur × champ. Une ligne par
+    champ plutôt qu'un JSON chiffré par fournisseur : « configuré » est la seule
+    existence de la ligne, oublier une clé est un DELETE, et une écriture ne
+    relit ni ne réécrit jamais les autres secrets de l'utilisateur.
+
+    La valeur n'est jamais rendue par l'API (seul `<champ>_configured`) ; elle
+    n'est lue que par le backend, au moment d'appeler le fournisseur.
+    """
+
+    user_email = models.EmailField(max_length=255, db_index=True)
+    provider = models.CharField(max_length=40)
+    field = models.CharField(max_length=40)
+    value = EncryptedTextField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'provider_credentials'
+        constraints = [
+            models.UniqueConstraint(fields=['user_email', 'provider', 'field'],
+                                    name='uniq_credential_per_user_provider_field'),
+        ]
+
+    def __str__(self) -> str:      # jamais la valeur
+        return f'{self.user_email} · {self.provider} · {self.field}'
 
 
 # ─────────────────────────────────────────────────────────────────────────────

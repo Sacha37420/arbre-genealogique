@@ -123,7 +123,11 @@ class SerrureTests(LabTestCase):
 
 
 class JetonEnParametreTests(FamilyTreeCase):
-    """« ?token= » : accepté sur le seul contenu d'un média (balise <img>)."""
+    """« ?token= » n'est plus lu nulle part, pas même sur le contenu d'un média.
+
+    Le frontend charge les images par HttpClient (en-tête Bearer, URL blob:) :
+    un jeton dans l'URL finissait dans l'historique, les journaux et le Referer.
+    """
 
     def setUp(self):
         super().setUp()
@@ -132,48 +136,51 @@ class JetonEnParametreTests(FamilyTreeCase):
     def get(self, token: str):
         return APIClient().get(self.url, {'token': token})
 
-    def test_jeton_valide_en_parametre_sert_le_fichier(self):
+    def test_jeton_valide_en_parametre_sans_en_tete_est_refuse(self):
+        # 403 et non 401 : KeycloakJWTAuthentication ne définit pas
+        # authenticate_header (gabarit du lab), donc DRF répond 403 à toute requête
+        # sans en-tête — comme sur toutes les autres routes. L'important : refusé,
+        # et storage jamais appelé.
         resp = self.get(make_token(ALICE))
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['detail'],
+                         APIClient().get(self.url).json()['detail'])   # même refus qu'anonyme
+        self.assertEqual(self.storage.calls, [])
+
+    def test_en_tete_du_proprietaire_sert_le_fichier(self):
+        resp = bearer(make_token(ALICE)).get(self.url)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(b''.join(resp.streaming_content), b'JPEG')
 
+    def test_etranger_avec_en_tete_recoit_404(self):
+        # Dave n'a aucun droit sur l'arbre privé d'Alice : get_object() cherche le
+        # média dans les seuls arbres visibles (OwnedTreeMixin) — 404, qui ne
+        # révèle pas l'existence du média, et storage n'est jamais appelé.
+        resp = bearer(make_token(DAVE)).get(self.url)
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(self.storage.calls, [])
+
+    def test_le_parametre_n_ajoute_rien_a_un_en_tete_etranger(self):
+        resp = bearer(make_token(DAVE)).get(self.url, {'token': make_token(ALICE)})
+        self.assertEqual(resp.status_code, 404)
+
     def test_sans_jeton_du_tout(self):
-        self.assertIn(APIClient().get(self.url).status_code, REFUS)
+        self.assertEqual(APIClient().get(self.url).status_code, 403)
 
-    def test_jeton_expire_mal_signe_ou_sans_email_en_parametre(self):
-        for nom, tok in (('expiré', make_token(ALICE, exp_in=-30)),
-                         ('autre clé', make_token(ALICE, key=FOREIGN_KEY)),
-                         ('sans email', make_token(None)),
-                         ('bruit', 'abc')):
-            with self.subTest(jeton=nom):
-                self.assertIn(self.get(tok).status_code, REFUS)
-        self.assertEqual(self.storage.calls, [])
-
-    def test_le_parametre_ne_donne_pas_plus_que_l_en_tete(self):
-        # Dave n'a aucun droit sur l'arbre d'Alice : en-tête ou paramètre, 404.
-        self.assertEqual(self.get(make_token(DAVE)).status_code, 404)
-        self.assertEqual(self.storage.calls, [])
-
-    def test_le_parametre_n_est_lu_nulle_part_ailleurs(self):
+    def test_le_parametre_n_est_lu_nulle_part(self):
         tok = make_token(ALICE)
         for route in ('/api/me/', '/api/trees/', f'/api/media/{self.objects["media"].pk}/',
-                      f'/api/trees/{self.tree.pk}/graph/'):
+                      f'/api/trees/{self.tree.pk}/graph/', self.url):
             with self.subTest(route=route):
                 self.assertIn(APIClient().get(route, {'token': tok}).status_code, REFUS)
 
     def test_en_tete_d_un_autre_client_refuse_aussi_sur_le_fichier(self):
         resp = bearer(make_token(ALICE, azp='admin-cli')).get(self.url)
         self.assertIn(resp.status_code, REFUS)
-
-    def test_jeton_d_un_autre_client_en_parametre_est_refuse(self):
-        # Corrigé (D1) : « ?token= » passe par la même validation que l'en-tête.
-        # Un jeton `admin-cli` (client public à mot de passe du realm) y était accepté.
-        resp = self.get(make_token(ALICE, azp='admin-cli'))
-        self.assertIn(resp.status_code, REFUS)
-        self.assertIn('autre client', resp.json()['detail'])
         self.assertEqual(self.storage.calls, [])
 
     @override_settings(KEYCLOAK_REQUIRED_GROUPS='famille')
-    def test_groupe_requis_applique_aussi_au_parametre(self):
-        self.assertIn(self.get(make_token(ALICE, groups=['amis'])).status_code, REFUS)
-        self.assertEqual(self.get(make_token(ALICE, groups=['famille'])).status_code, 200)
+    def test_groupe_requis_applique_au_fichier(self):
+        self.assertIn(bearer(make_token(ALICE, groups=['amis'])).get(self.url).status_code, REFUS)
+        self.assertEqual(bearer(make_token(ALICE, groups=['famille'])).get(self.url).status_code,
+                         200)

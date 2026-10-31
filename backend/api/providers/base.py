@@ -1,9 +1,11 @@
 """
 Socle commun aux fournisseurs généalogiques externes.
 
-Principe retenu : **les clés d'API ne sont jamais stockées côté serveur**. Elles
-accompagnent chaque requête, envoyées par le client dans le corps (`credentials`)
-ou dans l'en-tête `X-Provider-Key`. Le backend n'est qu'un relais : il traduit la
+Principe retenu : **les clés d'API vivent dans le coffre du serveur**, chiffrées
+au repos, par utilisateur (`models.ProviderCredential`, `fields.EncryptedTextField`).
+Le navigateur les dépose une fois (PUT) et ne les relit jamais ; chaque appel au
+fournisseur lit le coffre de l'utilisateur courant. Une clé envoyée dans la
+requête n'est pas lue. Le backend traduit la
 réponse hétérogène de chaque fournisseur en un PersonResult uniforme, ce qui
 permet à l'interface de traiter WikiTree et FamilySearch avec le même code.
 """

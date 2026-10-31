@@ -21,7 +21,6 @@ from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .auth_extra import KeycloakQueryTokenAuthentication
 from . import limits, storage_client
 from .defaults import build_defaults
 from .gedcom import GedcomExporter, GedcomImporter, category_for, parse_date
@@ -47,6 +46,7 @@ from .models import (
     Pedigree,
     PersonalName,
     Place,
+    ProviderCredential,
     Repository,
     Sex,
     SharedNote,
@@ -58,7 +58,14 @@ from .models import (
     TreeViewSettings,
     UserRecord,
 )
-from .providers import Geocoder, ProviderError, SearchQuery, describe_all, get_provider
+from .providers import (
+    Geocoder,
+    ProviderError,
+    SearchQuery,
+    credential_fields,
+    describe_all,
+    get_provider,
+)
 from .serializers import (
     CardTemplateSerializer,
     CitationSerializer,
@@ -433,15 +440,15 @@ class TreeViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
 
     @extend_schema(
         summary='Géocoder tous les lieux de l’arbre',
-        description='Clé facultative « geoapify_key » dans le corps ; sans elle, '
-                    'Nominatim (OpenStreetMap) est utilisé.',
+        description='Utilise la clé « geoapify_key » du coffre de l’utilisateur '
+                    '(fournisseur « nominatim ») ; sans elle, Nominatim (OpenStreetMap).',
     )
     @action(detail=True, methods=['post'])
     def geocode(self, request, pk=None):
         tree = self.get_object()
         self.check_tree(tree)
 
-        geocoder = Geocoder(_credentials(request))
+        geocoder = Geocoder(_credentials(request, GEOCODER_KEY))
         done, failed = 0, 0
 
         for place in tree.places.filter(latitude__isnull=True):
@@ -852,7 +859,7 @@ class PlaceViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
         self.check_tree(place.tree)
 
         try:
-            hit = Geocoder(_credentials(request)).geocode(place.name)
+            hit = Geocoder(_credentials(request, GEOCODER_KEY)).geocode(place.name)
         except ProviderError as exc:
             return Response({'detail': exc.message}, status=exc.status)
 
@@ -946,16 +953,12 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
 
     @extend_schema(
         summary='Contenu binaire du média',
-        description='Sert la photo. Le JWT peut être passé en « ?token= » : une balise '
-                    '<img> ne peut pas envoyer d’en-tête Authorization.',
-        parameters=[OpenApiParameter('token', str, description='JWT Keycloak (alternative à l’en-tête)')],
+        description='Sert la photo. Authentification par l’en-tête « Authorization: Bearer » '
+                    'seul : le frontend charge l’image par HttpClient (Blob) et l’affiche en '
+                    'URL blob:. Un jeton en paramètre d’URL n’est pas lu (il finirait dans '
+                    'l’historique, les journaux et le Referer).',
     )
-    @action(
-        detail=True,
-        methods=['get'],
-        url_path='file',
-        authentication_classes=[KeycloakQueryTokenAuthentication],
-    )
+    @action(detail=True, methods=['get'], url_path='file')
     def file(self, request, pk=None):
         """Proxie les octets depuis storage.
 
@@ -1159,19 +1162,80 @@ class CustomFieldDefViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
 # Enrichissement — fournisseurs externes
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _credentials(request) -> dict:
-    """
-    Récupère les clés d'API envoyées par le client.
+#: Clé du géocodeur dans le coffre (« nominatim »), figée à l'import.
+GEOCODER_KEY = Geocoder.key
 
-    Deux formes acceptées, jamais persistées côté serveur :
-      · corps JSON : {"credentials": {"access_token": "…"}}
-      · en-tête    : X-Provider-Key: <clé>   (raccourci mono-clé)
+
+def _credentials(request, provider_key: str) -> dict:
     """
-    credentials = dict(request.data.get('credentials') or {}) if hasattr(request, 'data') else {}
-    if header_key := request.headers.get('X-Provider-Key'):
-        credentials.setdefault('access_token', header_key)
-        credentials.setdefault('api_key', header_key)
-    return credentials
+    Clés d'API de l'utilisateur courant pour ce fournisseur, lues dans le coffre.
+
+    Rien de la requête n'est lu (ni corps « credentials », ni en-tête) : une clé
+    ne voyage plus avec chaque appel, le navigateur ne la détient plus.
+    """
+    return {
+        row.field: row.value
+        for row in ProviderCredential.objects.filter(user_email=request.user.email,
+                                                     provider=provider_key)
+        if row.value     # indéchiffrable ⇒ None (fields.py) : traité comme absent
+    }
+
+
+class ProviderCredentialView(APIView):
+    """
+    /api/provider-credentials/<provider>/ — le coffre de l'utilisateur courant.
+
+      GET → {"<champ>_configured": true|false} pour chaque champ du fournisseur ;
+            jamais la valeur, ni un extrait.
+      PUT {"<champ>": "<valeur>"} → 204 ; chaîne vide ⇒ la clé est oubliée.
+
+    Fournisseur inconnu, champ qui n'est pas le sien, ou valeur non textuelle → 400.
+    Chacun ne lit et n'écrit que son propre coffre (clé = email du jeton).
+    """
+
+    def _fields(self, provider: str) -> list[str]:
+        fields = credential_fields(provider)
+        if fields is None:
+            raise ValidationError({'provider': f'Fournisseur « {provider} » inconnu.'})
+        return fields
+
+    def _status(self, request, provider: str, fields: list[str]) -> dict:
+        present = set(
+            ProviderCredential.objects.filter(user_email=request.user.email, provider=provider)
+            .values_list('field', flat=True)
+        )
+        return {f'{field}_configured': field in present for field in fields}
+
+    @extend_schema(summary='État du coffre pour un fournisseur (jamais la valeur)')
+    def get(self, request, provider):
+        return Response(self._status(request, provider, self._fields(provider)))
+
+    @extend_schema(summary='Déposer ou oublier une clé d’API (chaîne vide = oublier)')
+    def put(self, request, provider):
+        fields = self._fields(provider)
+        data = request.data if isinstance(request.data, dict) else None
+        if not data:
+            raise ValidationError('Corps attendu : {"<champ>": "<valeur>"}.')
+        unknown = [key for key in data if key not in fields]
+        if unknown:
+            raise ValidationError({'detail': f'Champ(s) inconnu(s) pour {provider} : '
+                                             f'{", ".join(sorted(unknown))}.'})
+        if any(not isinstance(value, str) for value in data.values()):
+            raise ValidationError('Chaque valeur doit être une chaîne.')
+
+        with transaction.atomic():
+            for field, value in data.items():
+                value = value.strip()
+                if value:
+                    ProviderCredential.objects.update_or_create(
+                        user_email=request.user.email, provider=provider, field=field,
+                        defaults={'value': value},
+                    )
+                else:
+                    ProviderCredential.objects.filter(
+                        user_email=request.user.email, provider=provider, field=field,
+                    ).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ProviderListView(APIView):
@@ -1194,7 +1258,6 @@ class ProviderSearchView(APIView):
     Corps :
       {"provider": "wikitree", "tree": 1,
        "query": {"given_name": "Jean", "surname": "Dupont", "birth_year": 1875},
-       "credentials": {"access_token": "…"},   ← facultatif selon le fournisseur
        "save": true}                            ← conserve les candidats pour tri ultérieur
     """
 
@@ -1218,7 +1281,7 @@ class ProviderSearchView(APIView):
             raise ValidationError('Précisez au moins un nom ou un texte à rechercher.')
 
         try:
-            provider = get_provider(provider_key, _credentials(request))
+            provider = get_provider(provider_key, _credentials(request, provider_key))
             results = provider.search(query)
         except ProviderError as exc:
             return Response({'detail': exc.message, 'provider': provider_key}, status=exc.status)
@@ -1264,7 +1327,7 @@ class ProviderFetchView(APIView):
     """
     POST /api/enrich/fetch/ — fiche complète d'une personne, proches inclus.
 
-    Corps : {"provider": "wikitree", "external_id": "Clemens-1", "credentials": {…}}
+    Corps : {"provider": "wikitree", "external_id": "Clemens-1"} — clés lues dans le coffre.
     """
 
     @extend_schema(summary='Consulter une fiche chez un fournisseur')
@@ -1275,7 +1338,7 @@ class ProviderFetchView(APIView):
             raise ValidationError('Champs « provider » et « external_id » requis.')
 
         try:
-            provider = get_provider(provider_key, _credentials(request))
+            provider = get_provider(provider_key, _credentials(request, provider_key))
             result = provider.fetch(external_id)
         except ProviderError as exc:
             return Response({'detail': exc.message, 'provider': provider_key}, status=exc.status)
@@ -1289,7 +1352,6 @@ class ProviderImportView(APIView):
 
     Corps :
       {"provider": "wikitree", "external_id": "Clemens-1", "tree": 1,
-       "credentials": {…},
        "target": 12,                ← individu à compléter (sinon un nouveau est créé)
        "with_relatives": true,      ← crée aussi parents/conjoints/enfants annoncés
        "with_photo": true}          ← télécharge le portrait dans la base
@@ -1310,7 +1372,7 @@ class ProviderImportView(APIView):
             raise PermissionDenied('Arbre inconnu ou non autorisé.')
 
         try:
-            provider = get_provider(provider_key, _credentials(request))
+            provider = get_provider(provider_key, _credentials(request, provider_key))
             result = provider.fetch(external_id)
         except ProviderError as exc:
             return Response({'detail': exc.message, 'provider': provider_key}, status=exc.status)

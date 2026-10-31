@@ -12,7 +12,8 @@ window.__env = {
   keycloakRealm:    "${KEYCLOAK_REALM:-ssolab}",
   keycloakClientId: "${KEYCLOAK_CLIENT_ID}",
   apiUrl:           "https://${DOMAIN}/arbre-genealogique-api",
-  appUrl:           "https://${DOMAIN}/arbre-genealogique/"
+  appUrl:           "https://${DOMAIN}/arbre-genealogique/",
+  storageApiUrl:    "https://${DOMAIN}/storage-api"
 };
 JSEOF
 else

@@ -61,34 +61,34 @@ du realm a accès à l'app.
 - [ ] Après rotation, l'envoi de média fonctionne toujours
 **Vérifié le :**
 
-## Lot 5 — Jeton hors des URL d'images   ·   statut : à faire
+## Lot 5 — Jeton hors des URL d'images   ·   statut : en cours
 **Objectif :** le JWT ne part plus dans l'historique, les journaux ni le `Referer`.
 **Constat [C] :** `?token=` dans `core/api.service.ts:48-56` et `backend/api/auth_extra.py:19`.
 Dépend du chantier T4 (`to_do_global.md`) et du lot 2 de `storage`.
 **Tâches :**
-- [ ] Images chargées par `fetch` + `Blob`, ou ticket court ; retrait de `auth_extra.py`
+- [x] Images chargées par `fetch` + `Blob`, ou ticket court ; retrait de `auth_extra.py`
 **Tests à passer avant de clore le lot :**
 - [ ] Aucune requête d'image ne porte `token=` ; les photos d'un arbre privé s'affichent ; un étranger reçoit 403
-**Vérifié le :**
+**Vérifié le :** 2026-11-01 — `essai.sh arbre-genealogique` → 201 tests OK : `?token=` valide sans en-tête refusé (403, comme tout appel sans en-tête : la classe d'authentification ne pose pas d'`authenticate_header`), en-tête du propriétaire → 200, étranger avec en-tête → 404 (média hors des arbres visibles) ; `grep -rnE "token=" frontend/src` vide ; `ng build` vert. Reste en navigateur réel : photos d'un arbre privé et d'un arbre public affichées. — non déployé
 
-## Lot 6 — Réimport GEDCOM et petites frictions   ·   statut : à faire
+## Lot 6 — Réimport GEDCOM et petites frictions   ·   statut : en cours
 **Objectif :** des erreurs lisibles, aucun secret de fournisseur exposé à une XSS.
 **Tâches :**
 - [ ] Réimporter un GEDCOM donne aujourd'hui un 400 avec l'erreur brute de PostgreSQL : le remplacer par un message explicite. Ⓟ Fusion avec renumérotation des `@I1@` : à décider.
-- [ ] Ne plus garder les identifiants des fournisseurs en `localStorage` (`pages/search/search.component.ts:120,129,266`)
+- [x] Ne plus garder les identifiants des fournisseurs en `localStorage` (`pages/search/search.component.ts:120,129,266`)
 - [ ] Couleur d'arête du graphe et couleur de repli tirées des tokens (`pages/tree/tree.component.ts:42`, `shared/cards/full-card.component.ts:23`)
 **Tests à passer avant de clore le lot :**
 - [ ] Un second import du même fichier donne un message lisible et aucun doublon
 - [ ] Le thème sombre est vérifié dans `lab-runner`
-**Vérifié le :**
+**Vérifié le :** 2026-11-01 — case localStorage seule : coffre serveur `/api/provider-credentials/<fournisseur>/` (chiffré par `VAULT_ENCRYPTION_KEY`), 17 tests `test_coffre` dans 201 OK, `makemigrations --check` « No changes detected » ; `localStorage.removeItem('arbre.credentials')` à l'ouverture, sans envoi. — non déployé
 
-## Lot 7 — Gabarit front, documentation et chemin à portes   ·   statut : à faire
+## Lot 7 — Gabarit front, documentation et chemin à portes   ·   statut : en cours
 **Objectif :** même comportement que le gabarit corrigé (T3), un README juste, un déploiement par le moteur (T1).
 **Tâches :**
-- [ ] Polices en chemin relatif (`styles.scss:3-11`) ; `redirectUri` sur la page courante (`keycloak.service.ts:32,37`) ; `tokenBases()` ; PKCE
-- [ ] README : la l. 28 dit encore que les photos sont stockées en base (`BinaryField`) ; décrire `storage`, les partages et les fournisseurs
+- [x] Polices en chemin relatif (`styles.scss:3-11`) ; `redirectUri` sur la page courante (`keycloak.service.ts:32,37`) ; `tokenBases()` ; PKCE
+- [x] README : la l. 28 dit encore que les photos sont stockées en base (`BinaryField`) ; décrire `storage`, les partages et les fournisseurs
 - [ ] Ligne `.owners`, une fois l'exemption de cloisonnement disponible dans `validate-app.sh`
 **Tests à passer avant de clore le lot :**
 - [ ] `grep -n BinaryField README.md` ne rend rien
 - [ ] `validate-app.sh arbre-genealogique --quality-only` vert
-**Vérifié le :**
+**Vérifié le :** 2026-11-01 — cases gabarit front et README : `ng build` vert ; `grep -n BinaryField README.md` vide. `.owners` et `validate-app.sh --quality-only` non faits. — non déployé

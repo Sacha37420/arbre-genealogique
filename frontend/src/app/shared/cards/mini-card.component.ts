@@ -4,6 +4,7 @@ import { Component, computed, inject, input, output } from '@angular/core';
 import { ApiService } from '../../core/api.service';
 import { CardTemplate, PersonCard } from '../../core/models';
 import { cropStyle, initials, resolveFields } from './card-fields';
+import { AuthSrcDirective } from '../auth-src.directive';
 
 /**
  * La mini-carte : le nœud de l'arbre.
@@ -16,7 +17,7 @@ import { cropStyle, initials, resolveFields } from './card-fields';
 @Component({
   selector: 'app-mini-card',
   standalone: true,
-  imports: [NgStyle],
+  imports: [NgStyle, AuthSrcDirective],
   styleUrl: './mini-card.component.scss',
   template: `
     <div
@@ -30,7 +31,7 @@ import { cropStyle, initials, resolveFields } from './card-fields';
       @if (template()?.photo_position !== 'NONE') {
         <div class="photo" [ngStyle]="photoStyle()">
           @if (card().photo_url) {
-            <img [src]="photoSrc()" [alt]="card().full_name" [ngStyle]="crop()" />
+            <img [appAuthSrc]="photoSrc()" [alt]="card().full_name" [ngStyle]="crop()" />
           } @else if (template()?.photo_placeholder === 'initials') {
             <span class="initials" [style.color]="card().style.accent_color">{{ initials() }}</span>
           } @else {

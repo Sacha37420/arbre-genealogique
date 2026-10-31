@@ -50,7 +50,7 @@ class KeycloakJWTAuthentication(BaseAuthentication):
         return self.validate_token(auth_header[7:])
 
     def validate_token(self, token: str):
-        """Valide un jeton, d'où qu'il vienne (en-tête ou « ?token= ») : signature,
+        """Valide un jeton, présenté par l'en-tête Bearer : signature,
         expiration, `azp`, groupes, email. Point unique — tout chemin
         d'authentification doit passer par ici."""
         try:

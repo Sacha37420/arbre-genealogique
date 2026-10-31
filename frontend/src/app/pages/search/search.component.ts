@@ -6,7 +6,8 @@ import { ApiService } from '../../core/api.service';
 import { PersonCard, Provider, ProviderResult } from '../../core/models';
 import { TreeStore, describeError } from '../../core/tree-store';
 
-const CREDENTIALS_KEY = 'arbre.credentials';
+/** Ancien emplacement des clés (localStorage) : effacé à l'ouverture, jamais lu ni envoyé. */
+const LEGACY_CREDENTIALS_KEY = 'arbre.credentials';
 
 const RELATION_LABELS: Record<string, string> = {
   FATHER: 'Père',
@@ -19,9 +20,12 @@ const RELATION_LABELS: Record<string, string> = {
 /**
  * Recherche et enrichissement.
  *
- * Les clés d'API restent dans le navigateur (localStorage) et accompagnent chaque
- * requête : le serveur les relaie au fournisseur sans jamais les conserver. C'est
- * ce que veut le cahier des charges — les clés sont envoyées à l'endpoint.
+ * Les clés d'API sont dans le coffre du serveur, chiffrées, au nom de
+ * l'utilisateur (`/api/provider-credentials/<fournisseur>/`). Le navigateur les
+ * dépose (PUT) et ne les relit jamais : il ne connaît que « configurée / non
+ * configurée ». Les appels aux fournisseurs ne portent aucune clé — le serveur
+ * lit le coffre. Rien n'est gardé dans localStorage ni sessionStorage : une XSS
+ * ne peut pas y prendre les clés.
  */
 @Component({
   selector: 'app-search',
@@ -40,7 +44,11 @@ export class SearchComponent {
   // clé : c'est celle qui a le plus de chances de reconnaître un ancêtre ordinaire,
   // là où les arbres collaboratifs ne contiennent que ce qu'un bénévole a saisi.
   readonly providerKey = signal<string>('deces-insee');
-  readonly credentials = signal<Record<string, Record<string, string>>>(readCredentials());
+  /** État du coffre : fournisseur → champ → configuré ? (jamais la valeur). */
+  readonly configured = signal<Record<string, Record<string, boolean>>>({});
+  /** Saisie en cours, en mémoire seulement, vidée dès l'envoi. */
+  readonly drafts = signal<Record<string, string>>({});
+  readonly savingKey = signal('');
   readonly showKeys = signal(false);
 
   readonly given = signal('');
@@ -76,15 +84,24 @@ export class SearchComponent {
   readonly missingKey = computed(() => {
     const provider = this.provider();
     if (!provider?.requires_key) return false;
-    const stored = this.credentials()[provider.key] ?? {};
-    return provider.required_credentials.some((key) => !stored[key]?.trim());
+    const state = this.configured()[provider.key] ?? {};
+    return provider.required_credentials.some((key) => !state[key]);
   });
 
   constructor() {
+    // Les anciennes clés du navigateur sont effacées sans être envoyées : chacun
+    // ressaisit la sienne une fois, dans le coffre.
+    localStorage.removeItem(LEGACY_CREDENTIALS_KEY);
+
     this.store.load();
 
     this.api.getProviders().subscribe({
-      next: (providers) => this.providers.set(providers),
+      next: (providers) => {
+        this.providers.set(providers);
+        for (const provider of providers) {
+          if (credentialFields(provider).length) this.refreshCredentials(provider.key);
+        }
+      },
       error: (err) => this.error.set(describeError(err)),
     });
 
@@ -109,30 +126,68 @@ export class SearchComponent {
     });
   }
 
-  // ── Clés d'API ────────────────────────────────────────────────────────────
-  credentialValue(providerKey: string, field: string): string {
-    return this.credentials()[providerKey]?.[field] ?? '';
+  // ── Clés d'API (coffre du serveur) ──────────────────────────────────────
+  fieldsOf(provider: Provider): string[] {
+    return credentialFields(provider);
   }
 
-  setCredential(providerKey: string, field: string, value: string): void {
-    this.credentials.update((all) => {
-      const next = { ...all, [providerKey]: { ...(all[providerKey] ?? {}), [field]: value } };
-      localStorage.setItem(CREDENTIALS_KEY, JSON.stringify(next));
-      return next;
+  isConfigured(providerKey: string, field: string): boolean {
+    return this.configured()[providerKey]?.[field] ?? false;
+  }
+
+  draft(providerKey: string, field: string): string {
+    return this.drafts()[`${providerKey}.${field}`] ?? '';
+  }
+
+  setDraft(providerKey: string, field: string, value: string): void {
+    this.drafts.update((all) => ({ ...all, [`${providerKey}.${field}`]: value }));
+  }
+
+  /** Dépose la clé saisie dans le coffre, puis l'oublie côté navigateur. */
+  saveCredential(providerKey: string, field: string): void {
+    const value = this.draft(providerKey, field).trim();
+    if (!value) return;
+    this.writeCredentials(providerKey, { [field]: value });
+  }
+
+  /** « Oublier » : chaîne vide pour chaque champ du fournisseur ⇒ supprimé du coffre. */
+  forgetKeys(provider: Provider): void {
+    const body: Record<string, string> = {};
+    for (const field of credentialFields(provider)) body[field] = '';
+    this.writeCredentials(provider.key, body);
+  }
+
+  private writeCredentials(providerKey: string, body: Record<string, string>): void {
+    this.savingKey.set(providerKey);
+    this.error.set('');
+    this.api.putProviderCredentials(providerKey, body).subscribe({
+      next: () => {
+        this.savingKey.set('');
+        this.drafts.update((all) => {
+          const next = { ...all };
+          for (const field of Object.keys(body)) delete next[`${providerKey}.${field}`];
+          return next;
+        });
+        this.refreshCredentials(providerKey);
+      },
+      error: (err) => {
+        this.savingKey.set('');
+        this.error.set(describeError(err));
+      },
     });
   }
 
-  forgetKeys(providerKey: string): void {
-    this.credentials.update((all) => {
-      const next = { ...all };
-      delete next[providerKey];
-      localStorage.setItem(CREDENTIALS_KEY, JSON.stringify(next));
-      return next;
+  private refreshCredentials(providerKey: string): void {
+    this.api.getProviderCredentials(providerKey).subscribe({
+      next: (status) => {
+        const state: Record<string, boolean> = {};
+        for (const [key, value] of Object.entries(status)) {
+          if (key.endsWith('_configured')) state[key.slice(0, -'_configured'.length)] = value;
+        }
+        this.configured.update((all) => ({ ...all, [providerKey]: state }));
+      },
+      error: () => this.configured.update((all) => ({ ...all, [providerKey]: {} })),
     });
-  }
-
-  private currentCredentials(): Record<string, string> {
-    return this.credentials()[this.providerKey()] ?? {};
   }
 
   // ── Recherche ─────────────────────────────────────────────────────────────
@@ -159,7 +214,6 @@ export class SearchComponent {
           place: this.place().trim(),
           limit: 15,
         },
-        credentials: this.currentCredentials(),
         save: this.store.currentId() !== null,
       })
       .subscribe({
@@ -183,7 +237,7 @@ export class SearchComponent {
     this.error.set('');
 
     // La recherche ne renvoie pas les proches : il faut la fiche complète.
-    this.api.fetchProvider(result.provider, result.external_id, this.currentCredentials()).subscribe({
+    this.api.fetchProvider(result.provider, result.external_id).subscribe({
       next: (full) => this.detail.set(full),
       error: (err) => this.error.set(describeError(err)),
     });
@@ -213,7 +267,6 @@ export class SearchComponent {
         target: this.target(),
         with_relatives: this.withRelatives(),
         with_photo: this.withPhoto(),
-        credentials: this.currentCredentials(),
       })
       .subscribe({
         next: (response) => {
@@ -239,7 +292,7 @@ export class SearchComponent {
     if (treeId === null) return;
 
     this.message.set('Géocodage en cours…');
-    this.api.geocodeTree(treeId, this.credentials()['nominatim'] ?? {}).subscribe({
+    this.api.geocodeTree(treeId).subscribe({
       next: (response) => {
         this.message.set(
           `${response.geocoded} lieu(x) géocodé(s), ${response.not_found} introuvable(s).`,
@@ -261,10 +314,7 @@ export class SearchComponent {
   }
 }
 
-function readCredentials(): Record<string, Record<string, string>> {
-  try {
-    return JSON.parse(localStorage.getItem(CREDENTIALS_KEY) ?? '{}');
-  } catch {
-    return {};
-  }
+/** Champs du coffre d'un fournisseur : obligatoires puis facultatifs (comme le serveur). */
+function credentialFields(provider: Provider): string[] {
+  return provider.required_credentials.concat(provider.optional_credentials ?? []);
 }
