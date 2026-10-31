@@ -1,10 +1,9 @@
 """Sérialiseurs DRF. Les écritures de dates passent toutes par le parseur GEDCOM."""
-import base64
 import hashlib
 
 from rest_framework import serializers
 
-from . import storage_client
+from . import limits, storage_client
 from .storage_client import upload_bytes as storage_upload
 from .gedcom import category_for, parse_date
 from .models import (
@@ -201,7 +200,8 @@ class MediaObjectSerializer(serializers.ModelSerializer):
             header, raw = raw.split(',', 1)
             if 'mime' not in validated and ':' in header and ';' in header:
                 validated['mime'] = header.split(':', 1)[1].split(';', 1)[0]
-        blob = base64.b64decode(raw)
+        # Taille décodée vérifiée avant le décodage (413), puis décodage strict.
+        blob = limits.decode_base64(raw)
         # Sur un PATCH partiel, `filename` n'est pas renvoyé : reprendre celui de
         # la fiche plutôt que de retomber sur un chemin anonyme dans storage.
         nom = validated.get('filename') or getattr(instance, 'filename', '') or 'media'

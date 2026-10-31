@@ -22,7 +22,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .auth_extra import KeycloakQueryTokenAuthentication
-from . import storage_client
+from . import limits, storage_client
 from .defaults import build_defaults
 from .gedcom import GedcomExporter, GedcomImporter, category_for, parse_date
 from .graph import build_graph, build_timeline
@@ -872,12 +872,21 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
     serializer_class = MediaObjectSerializer
     parser_classes = [JSONParser, MultiPartParser]
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        # Avant toute lecture du corps (l'analyse est paresseuse) : un corps plus
+        # gros que le plus gros envoi légitime n'est ni lu ni écrit sur le disque.
+        if request.method in ('POST', 'PUT', 'PATCH'):
+            limits.check_request_body(request)
+
     def create(self, request, *args, **kwargs):
         """Accepte aussi bien un upload multipart (« file ») que du base64 (« data_base64 »)."""
         upload = request.FILES.get('file')
         if upload is None:
             return super().create(request, *args, **kwargs)
 
+        # Taille exacte du fichier, avant de le lire et avant tout appel à storage.
+        limits.check_media_size(upload.size)
         tree = self._tree_from(request.data.get('tree'))
         blob = upload.read()
         mime = upload.content_type or 'application/octet-stream'
@@ -1388,7 +1397,7 @@ class ProviderImportView(APIView):
     def _import_photo(self, tree, individual, result) -> None:
         try:
             response = requests.get(
-                result.photo_url, timeout=15,
+                result.photo_url, timeout=15, stream=True,
                 headers={'User-Agent': 'arbre-genealogique/1.0'},
             )
             response.raise_for_status()
@@ -1396,7 +1405,14 @@ class ProviderImportView(APIView):
             # Une photo indisponible ne doit pas faire échouer l'import des données.
             return
 
-        blob = response.content
+        try:
+            blob = self._read_capped(response)
+        except requests.RequestException:
+            return
+        finally:
+            close = getattr(response, 'close', None)
+            if close:
+                close()
         checksum = hashlib.sha256(blob).hexdigest()
         mime = response.headers.get('Content-Type', 'image/jpeg').split(';')[0]
         filename = result.photo_url.rsplit('/', 1)[-1][:250]
@@ -1435,6 +1451,30 @@ class ProviderImportView(APIView):
                 individual=individual,
                 is_primary=not individual.media_links.filter(is_primary=True).exists(),
             )
+
+    @staticmethod
+    def _read_capped(response) -> bytes:
+        """Octets du portrait, sans jamais en lire plus que la limite + 1.
+
+        Taille annoncée (Content-Length) au-delà de la limite : 413 sans rien
+        lire. Taille inconnue ou fausse : lecture par morceaux, 413 dès que la
+        limite est dépassée. Levée dans le `transaction.atomic()` de `post`,
+        l'erreur annule tout l'import : rien n'est créé, rien ne part vers storage.
+        """
+        max_bytes = limits.media_max_bytes()
+        try:
+            annonce = int(response.headers.get('Content-Length') or -1)
+        except (TypeError, ValueError):
+            annonce = -1
+        if annonce > max_bytes:
+            raise limits.MediaTooLarge()
+        morceaux, total = [], 0
+        for morceau in response.iter_content(chunk_size=65536):
+            total += len(morceau)
+            if total > max_bytes:
+                raise limits.MediaTooLarge()
+            morceaux.append(morceau)
+        return b''.join(morceaux)
 
 
 class EnrichmentMatchViewSet(OwnedTreeMixin, viewsets.ModelViewSet):

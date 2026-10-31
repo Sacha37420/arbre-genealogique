@@ -20,8 +20,9 @@ services:
     networks:
       - sso-net
       - dev-net
-    volumes:
-      - ./backend:/app
+    # Pas de montage du code : il est copié dans l'image (Dockerfile, COPY . .).
+    # Un montage ./backend:/app mettait en service le contenu du dossier à chaque
+    # redémarrage, sans passer par les tests du chemin à portes.
     labels:
       caddy: "${DOMAIN}"
       caddy.handle_path: "/arbre-genealogique-api/*"

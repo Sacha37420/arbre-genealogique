@@ -197,3 +197,15 @@ PUBLIC_DOMAIN = config('DOMAIN', default='CHANGE_ME')
 # n'administre pas Keycloak, elle n'utilise ce client que pour storage).
 KEYCLOAK_ADMIN_CLIENT_ID = config('KEYCLOAK_ADMIN_CLIENT_ID', default='arbre-genealogique-admin')
 KEYCLOAK_ADMIN_CLIENT_SECRET = config('KEYCLOAK_ADMIN_CLIENT_SECRET', default='')
+
+# Taille maximale d'un média, par fichier (api/limits.py) : 413 avant tout appel
+# à storage, sur les trois chemins d'écriture. 50 Mo par défaut (chantier
+# « urgences », contrat v1 § 7) ; réglable par MEDIA_MAX_BYTES dans le .env.
+MEDIA_MAX_BYTES = config('MEDIA_MAX_BYTES', default=52428800, cast=int)
+# Cohérent avec la limite : un média à la limite, envoyé en base64 comme champ
+# d'un formulaire multipart, doit passer le contrôle de Django (2,5 Mo par
+# défaut, qui refusait en 400 tout base64 de plus de ~1,9 Mo). Les parties
+# fichier d'un multipart n'y sont pas comptées, et DRF ne l'applique pas à un
+# corps JSON : c'est api/limits.check_request_body (Content-Length) qui borne
+# le corps de toute requête d'écriture de média.
+DATA_UPLOAD_MAX_MEMORY_SIZE = -(-MEDIA_MAX_BYTES // 3) * 4 + 1024 * 1024

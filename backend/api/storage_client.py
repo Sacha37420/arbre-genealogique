@@ -196,6 +196,10 @@ def upload_bytes(blob: bytes, filename: str, content_type: str = '',
     multipart, base64 `data_base64`, import d'une photo depuis un fournisseur
     externe) : le nommage des chemins reste ainsi défini à un seul endroit.
     """
+    # Dernier filet : les trois chemins vérifient déjà la taille avant d'arriver
+    # ici (api/limits.py), aucun octet de trop ne doit partir vers storage.
+    from .limits import check_media_size  # import tardif : limits importe DRF
+    check_media_size(len(blob))
     nom = _safe_name(filename)
     relative_path = f'media/{uuid4().hex}-{nom}'
     return upload(relative_path, io.BytesIO(blob), nom, content_type, namespace=namespace)['relative_path']
