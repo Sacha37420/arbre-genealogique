@@ -68,7 +68,7 @@ Dépend du chantier T4 (`to_do_global.md`) et du lot 2 de `storage`.
 **Tâches :**
 - [x] Images chargées par `fetch` + `Blob`, ou ticket court ; retrait de `auth_extra.py`
 **Tests à passer avant de clore le lot :**
-- [ ] Aucune requête d'image ne porte `token=` ; les photos d'un arbre privé s'affichent ; un étranger reçoit 403
+- [x] Aucune requête d'image ne porte `token=` ; les photos d'un arbre privé s'affichent ; un étranger reçoit 403 ; média lu par son propriétaire par `fetch` + en-tête, refusé à un autre compte (404) et sans jeton (403) — vérifié le 2026-11-01 (lab-runner, `e2e_member`)
 **Vérifié le :** 2026-11-01 — `essai.sh arbre-genealogique` → 201 tests OK : `?token=` valide sans en-tête refusé (403, comme tout appel sans en-tête : la classe d'authentification ne pose pas d'`authenticate_header`), en-tête du propriétaire → 200, étranger avec en-tête → 404 (média hors des arbres visibles) ; `grep -rnE "token=" frontend/src` vide ; `ng build` vert. Reste en navigateur réel : photos d'un arbre privé et d'un arbre public affichées. — non déployé
 
 ## Lot 6 — Réimport GEDCOM et petites frictions   ·   statut : en cours
