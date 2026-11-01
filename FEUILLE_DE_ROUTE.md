@@ -10,8 +10,10 @@ dépôt du lab. Légende : [C] constaté, [D] déduit.
 
 **Pas de test de cloisonnement navigateur, à dessein** : l'app n'exige aucun groupe. Sa protection
 tient entièrement dans l'API, par arbre (propriétaire, partages lecteur/éditeur, arbre public), et
-ses tests backend la vérifient. `validate-app.sh` refuse aujourd'hui ce cas : une exemption déclarée
-est à ajouter au cadriciel (chantier T1).
+ses tests backend la vérifient. La ligne suivante est l'exemption déclarée que lit `validate-app.sh`
+(réservée aux apps du superutilisateur) :
+
+cloisonnement : aucun — l'app n'exige aucun groupe ; la protection est dans l'API, par arbre, tenue par ses tests backend
 
 ## Commande de test
 python manage.py test
