@@ -92,3 +92,10 @@ Dépend du chantier T4 (`to_do_global.md`) et du lot 2 de `storage`.
 - [ ] `grep -n BinaryField README.md` ne rend rien
 - [ ] `validate-app.sh arbre-genealogique --quality-only` vert
 **Vérifié le :** 2026-11-01 — cases gabarit front et README : `ng build` vert ; `grep -n BinaryField README.md` vide. `.owners` et `validate-app.sh --quality-only` non faits. — non déployé
+
+## Mise en service — chantier « failles » (2026-11-01)
+Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
+que l'ancienne tournait, `scripts/app-test.sh` : 201 tests OK, puis `up -d --no-build` ; ports
+publiés sur `127.0.0.1` ; client Keycloak passé en PKCE S256 exigé, URI de retour réduites à celles de
+l'app (`create-app-client.sh --pkce --prune-uris`) ; cloisonnement : aucun test navigateur à dessein (protection dans l'API).
+Restent les vérifications en navigateur réel notées dans les lots (images, coffres de clés, envois).
