@@ -35,7 +35,7 @@ partage en lecteur ou en éditeur.
 d'app-builder (CLAUDE.md). **P1.**
 **Tâches :**
 - [x] Retirer le montage (`docker-compose.yml`) ; le Dockerfile copie déjà le code (`COPY . .`), aucun autre service ne montait le dossier
-- [ ] Reconstruire l'image, la tester (`app-test.sh`), puis `up -d --no-build` (architecte, à l'intégration)
+- [x] Reconstruire l'image, la tester (`app-test.sh`), puis `up -d --no-build` (architecte, à l'intégration) — fait le 2026-10-31, voir « Mis en service » ci-dessous
 **Tests à passer avant de clore le lot :**
 - [x] `docker inspect arbre-genealogique-backend` ne montre aucun montage sur `/app` (2026-10-31 : `Mounts=[]`)
 - [x] Suite backend verte
@@ -56,14 +56,14 @@ du realm a accès à l'app.
 **Objectif :** solder les points « à l'attention de l'architecte » de `carto-arbre.md`.
 **Tâches :**
 - [ ] Chercher en base les références croisées entre arbres créées avant le correctif D3 (lecture seule), puis les corriger avec accord
-- [ ] Ⓟ Faire tourner `KEYCLOAK_ADMIN_CLIENT_SECRET` : il a été affiché dans un terminal pendant le chantier
+- [x] Ⓟ Faire tourner `KEYCLOAK_ADMIN_CLIENT_SECRET` : il a été affiché dans un terminal pendant le chantier — fait le 2026-11-01 (chantier « failles », F16 de `to_do_global.md`)
 - [ ] Ⓟ Donner une règle au drapeau `Individual.confidential` : il est exposé tel quel, aucune règle dans le code
 **Tests à passer avant de clore le lot :**
 - [ ] Requête de contrôle : 0 ligne
 - [ ] Après rotation, l'envoi de média fonctionne toujours
 **Vérifié le :**
 
-## Lot 5 — Jeton hors des URL d'images   ·   statut : en cours
+## Lot 5 — Jeton hors des URL d'images   ·   statut : livré
 **Objectif :** le JWT ne part plus dans l'historique, les journaux ni le `Referer`.
 **Constat [C] :** `?token=` dans `core/api.service.ts:48-56` et `backend/api/auth_extra.py:19`.
 Dépend du chantier T4 (`to_do_global.md`) et du lot 2 de `storage`.
@@ -72,8 +72,11 @@ Dépend du chantier T4 (`to_do_global.md`) et du lot 2 de `storage`.
 **Tests à passer avant de clore le lot :**
 - [x] Aucune requête d'image ne porte `token=` ; les photos d'un arbre privé s'affichent ; un étranger reçoit 403 ; média lu par son propriétaire par `fetch` + en-tête, refusé à un autre compte (404) et sans jeton (403) — vérifié le 2026-11-01 (lab-runner, `e2e_member`)
 **Vérifié le :** 2026-11-01 — `essai.sh arbre-genealogique` → 201 tests OK : `?token=` valide sans en-tête refusé (403, comme tout appel sans en-tête : la classe d'authentification ne pose pas d'`authenticate_header`), en-tête du propriétaire → 200, étranger avec en-tête → 404 (média hors des arbres visibles) ; `grep -rnE "token=" frontend/src` vide ; `ng build` vert. Reste en navigateur réel : photos d'un arbre privé et d'un arbre public affichées. — non déployé
+**Relecture du 2026-11-08 (nuit) :** passé à « livré » : toutes les cases sont cochées, le commit
+`dc10ed5` est dans la version en service (`2af0170`, chantier « failles »), `backend/api/auth_extra.py`
+n'existe plus et `grep -rn "token=" frontend/src` est vide.
 
-## Lot 6 — Réimport GEDCOM et petites frictions   ·   statut : en cours
+## Lot 6 — Réimport GEDCOM et petites frictions   ·   statut : à faire
 **Objectif :** des erreurs lisibles, aucun secret de fournisseur exposé à une XSS.
 **Tâches :**
 - [ ] Réimporter un GEDCOM donne aujourd'hui un 400 avec l'erreur brute de PostgreSQL : le remplacer par un message explicite. Ⓟ Fusion avec renumérotation des `@I1@` : à décider.
@@ -83,6 +86,9 @@ Dépend du chantier T4 (`to_do_global.md`) et du lot 2 de `storage`.
 - [ ] Un second import du même fichier donne un message lisible et aucun doublon
 - [ ] Le thème sombre est vérifié dans `lab-runner`
 **Vérifié le :** 2026-11-01 — case localStorage seule : coffre serveur `/api/provider-credentials/<fournisseur>/` (chiffré par `VAULT_ENCRYPTION_KEY`), 17 tests `test_coffre` dans 201 OK, `makemigrations --check` « No changes detected » ; `localStorage.removeItem('arbre.credentials')` à l'ouverture, sans envoi. — non déployé
+**Relecture du 2026-11-08 (nuit) :** remis à « à faire » (un seul lot « en cours » par app, c'est le lot 7) ;
+la case `localStorage` reste faite. Couleurs toujours en dur : `pages/tree/tree.component.ts:41`
+(`'#b6c0cd'`), `shared/cards/full-card.component.ts:24` (`'#fff'`).
 
 ## Lot 7 — Gabarit front, documentation et chemin à portes   ·   statut : en cours
 **Objectif :** même comportement que le gabarit corrigé (T3), un README juste, un déploiement par le moteur (T1).
@@ -91,9 +97,13 @@ Dépend du chantier T4 (`to_do_global.md`) et du lot 2 de `storage`.
 - [x] README : la l. 28 dit encore que les photos sont stockées en base (`BinaryField`) ; décrire `storage`, les partages et les fournisseurs
 - [ ] Ligne `.owners`, une fois l'exemption de cloisonnement disponible dans `validate-app.sh`
 **Tests à passer avant de clore le lot :**
-- [ ] `grep -n BinaryField README.md` ne rend rien
-- [ ] `validate-app.sh arbre-genealogique --quality-only` vert
+- [x] `grep -n BinaryField README.md` ne rend rien
+- [x] `validate-app.sh arbre-genealogique --quality-only` vert (avertissement d'exemption de cloisonnement, voulu)
 **Vérifié le :** 2026-11-01 — cases gabarit front et README : `ng build` vert ; `grep -n BinaryField README.md` vide. `.owners` et `validate-app.sh --quality-only` non faits. — non déployé
+
+**Relecture du 2026-11-08 (nuit) :** `grep -n BinaryField README.md` vide ; `validate-app.sh --quality-only`
+joué sur une copie de cette feuille de route (outil `valq.sh` du chantier de nuit) : code 0, avec
+l'avertissement d'exemption. Reste la ligne `.owners`.
 
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
