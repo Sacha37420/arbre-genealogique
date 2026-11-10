@@ -3,11 +3,15 @@
 Application d'affichage et d'édition d'arbres généalogiques : Django + DRF au dos,
 Angular 21 devant, SSO Keycloak, PostgreSQL.
 
-- Backend : http://localhost:8090 — documentation OpenAPI sur `/api/docs/`
+- Backend : http://localhost:8090 — documentation OpenAPI sur `/api/docs/` **en `DEBUG` seulement**
+  (404 en service, `backend/config/urls.py:28`)
 - Frontend : http://localhost:4208
+- Avec un domaine : `https://<domaine>/arbre-genealogique/` (API sous `/arbre-genealogique-api/`)
+
+Depuis la racine du lab :
 
 ```bash
-bash ../setup2.sh arbre-genealogique --yes
+bash scripts/setup2.sh arbre-genealogique --yes
 ```
 
 ---
