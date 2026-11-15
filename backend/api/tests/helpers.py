@@ -129,6 +129,12 @@ class FakeStorage:
     def __init__(self) -> None:
         self.files: dict[str, dict[str, bytes]] = {}
         self.members: dict[str, dict[str, str]] = {}
+        # Hiérarchie (contrat storage-hierarchie) : parent de chacun de NOS
+        # partages, partages d'un autre propriétaire (403 / 400 `name`), et
+        # refus de tout `parent` (400 `parent`).
+        self.parents: dict[str, str | None] = {}
+        self.foreign: set[str] = set()
+        self.refuse_parent = False
         self.calls: list[tuple[str, str]] = []
         self.token_requests = 0
         self.down = False
@@ -168,13 +174,32 @@ class FakeStorage:
         raise AssertionError((method, rest))
 
     def _shares(self, method, parts, **kwargs):
+        if method == 'GET' and not parts:
+            return _Response(200, {
+                'owned': [{'name': n, 'parent': self.parents.get(n)} for n in sorted(self.members)],
+                'member_of': [], 'tree': [],
+            })
         if method == 'POST' and not parts:
             name = kwargs['data']['name']
-            if name in self.members:
-                return _Response(500)   # comportement réel de storage sur un doublon
+            parent = kwargs['data'].get('parent') or None
+            if name in self.members or name in self.foreign:
+                return _Response(400, {'name': ['Ce nom de partage est déjà pris.']})
+            if parent is not None and (self.refuse_parent or parent not in self.members):
+                return _Response(400, {'parent': ['refusé']})
             self.members[name] = {}
-            return _Response(201, {'name': name})
+            self.parents[name] = parent
+            return _Response(201, {'name': name, 'parent': parent})
         namespace = parts[0]
+        if namespace in self.foreign:
+            return _Response(403)
+        if method == 'PATCH' and len(parts) == 1:
+            if namespace not in self.members:
+                return _Response(404)
+            parent = kwargs['data'].get('parent') or None
+            if parent is not None and (self.refuse_parent or parent not in self.members):
+                return _Response(400, {'parent': ['refusé']})
+            self.parents[namespace] = parent
+            return _Response(200, {'name': namespace, 'parent': parent})
         assert parts[1] == 'members', parts
         if namespace not in self.members:
             return _Response(404)
@@ -198,6 +223,9 @@ class FakeStorage:
     def delete(self, url, **kwargs):
         return self._route('DELETE', url, **kwargs)
 
+    def patch(self, url, **kwargs):
+        return self._route('PATCH', url, **kwargs)
+
     # — lecture par les tests —
     def all_paths(self) -> set[tuple[str, str]]:
         return {(ns, p) for ns, store in self.files.items() for p in store}
@@ -205,7 +233,7 @@ class FakeStorage:
     def writes(self) -> list[tuple[str, str]]:
         """Appels qui modifient storage (hors jeton de service)."""
         return [c for c in self.calls
-                if c[0] in ('POST', 'DELETE') and 'openid-connect' not in c[1]]
+                if c[0] in ('POST', 'DELETE', 'PATCH') and 'openid-connect' not in c[1]]
 
 
 def ns(tree) -> str:
@@ -239,6 +267,7 @@ class LabTestCase(TestCase):
         self.storage = FakeStorage()
         self._patch(mock.patch.object(storage_client, 'requests', self.storage))
         self._patch(mock.patch.dict(storage_client._token_cache, {'value': '', 'exp': 0.0}))
+        self._patch(mock.patch.object(storage_client, '_container_ready', False))
         # Filet : tout appel HTTP non simulé échoue tout de suite, et se voit.
         self.network = self._patch(mock.patch(
             'requests.sessions.Session.request',
