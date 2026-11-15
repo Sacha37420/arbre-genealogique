@@ -289,45 +289,145 @@ def _shares_url(suffix: str = '') -> str:
     return f'{settings.STORAGE_INTERNAL_URL}/api/shares/{suffix}'
 
 
-def ensure_share(namespace: str) -> None:
-    """Crée le partage s'il n'existe pas encore (idempotent).
+# ── Hiérarchie : conteneur de l'app et rattachement des partages d'arbre ────
+#
+# Chantier « storage-hierarchie » (contrat v2, I1/I3) : chaque partage d'arbre
+# est rangé sous le partage d'app ``arbre-genealogique`` (le « conteneur »),
+# qui appartient au même compte de service — storage exige que parent et
+# enfant aient le même propriétaire. Organisation pure (storage ne fait
+# hériter aucun droit d'un parent) : la hiérarchie ne doit JAMAIS faire
+# échouer la création d'un partage, donc d'un arbre ou d'un dépôt. Conteneur
+# indisponible ou parent refusé ⇒ partage créé à la racine, avertissement à
+# message fixe ; la commande ``rattacher_partages_storage`` le rangera.
 
-    Vérifie l'existence AVANT de tenter la création plutôt que de se fier au
-    code HTTP renvoyé par un POST en double : au moment d'écrire ceci,
-    storage/backend/api/views.py::ShareListCreateView.post laisse remonter la
-    ValidationError levée par Share.full_clean() (contrainte d'unicité sur le
-    nom, qui est la clé primaire) au lieu de la convertir en 400 comme le
-    laisse penser le `except IntegrityError` du code — un second POST sur un
-    nom déjà pris répond donc 500, pas 400 (constaté en conditions réelles
-    lors de cette migration, à corriger côté storage — hors périmètre de cette
-    app). `list_members` sert de sonde d'existence + de propriété (404/403 si
-    le partage n'existe pas encore ou ne nous appartient pas).
+CONTAINER = 'arbre-genealogique'
+
+# Conteneur prêt (il nous appartient) — mémorisé par processus. Un échec n'est
+# pas mémorisé : la prochaine création réessaie.
+_container_ready = False
+
+_MSG_SANS_PARENT = (
+    "storage : partage d'arbre créé sans rattachement au conteneur de l'app "
+    "(conteneur indisponible ou parent refusé) — à ranger par rattacher_partages_storage"
+)
+
+
+def container_is_ours() -> bool:
+    """Lecture seule : le conteneur existe-t-il et nous appartient-il ?"""
+    try:
+        list_members(CONTAINER)
+        return True
+    except StorageClientError:
+        return False
+
+
+def ensure_container() -> bool:
+    """S'assure que le conteneur existe et nous appartient (I1, étape 1).
+    Rend False s'il est indisponible (nom pris par un autre propriétaire,
+    storage en erreur) — ne lève jamais."""
+    global _container_ready
+    if _container_ready:
+        return True
+    if container_is_ours():
+        _container_ready = True
+        return True
+    try:
+        resp = requests.post(
+            _shares_url(), headers=_headers(), data={'name': CONTAINER}, timeout=_TIMEOUT,
+        )
+    except (requests.RequestException, StorageClientError):
+        return False
+    if resp.status_code == 201:
+        _container_ready = True
+        return True
+    return False
+
+
+def _error_keys(resp) -> set:
+    if resp.status_code != 400:
+        return set()
+    try:
+        body = resp.json()
+    except ValueError:
+        return set()
+    return set(body) if isinstance(body, dict) else set()
+
+
+def _is_parent_refusal(resp) -> bool:
+    return 'parent' in _error_keys(resp)
+
+
+def _is_name_taken(resp) -> bool:
+    return 'name' in _error_keys(resp)
+
+
+def _post_share(data: dict):
+    try:
+        return requests.post(_shares_url(), headers=_headers(), data=data, timeout=_TIMEOUT)
+    except requests.RequestException as exc:
+        raise StorageClientError(f'storage injoignable : {exc}') from exc
+
+
+def ensure_share(namespace: str) -> None:
+    """Crée le partage s'il n'existe pas encore (idempotent), rattaché au
+    conteneur (I1) — seule fonction de création de partage de l'app.
+
+    Vérifie l'existence AVANT de tenter la création : ``list_members`` sert de
+    sonde d'existence + de propriété (404/403 si le partage n'existe pas encore
+    ou ne nous appartient pas). Un POST sur un nom déjà pris répond 400 à clé
+    ``name`` (``ShareListCreateView.post`` ; c'était un 500 lors de la
+    migration de juillet) : le filet final revérifie l'existence plutôt que de
+    dépendre d'un code HTTP précis — c'est le cas « il existe déjà », un succès.
     """
     try:
         list_members(namespace)
-        return  # existe déjà et nous appartient : rien à faire.
+        return  # existe déjà et nous appartient : rien à faire (I3 le range).
     except StorageClientError:
         pass
 
-    try:
-        resp = requests.post(
-            _shares_url(), headers=_headers(), data={'name': namespace}, timeout=_TIMEOUT,
-        )
-    except requests.RequestException as exc:
-        raise StorageClientError(f'storage injoignable : {exc}') from exc
-    if resp.status_code == 201:
-        return
+    if ensure_container():
+        resp = _post_share({'name': namespace, 'parent': CONTAINER})
+        if _is_parent_refusal(resp):
+            logger.warning(_MSG_SANS_PARENT)
+            resp = _post_share({'name': namespace})
+    else:
+        logger.warning(_MSG_SANS_PARENT)
+        resp = _post_share({'name': namespace})
+    if resp.status_code == 201 or _is_name_taken(resp):
+        return  # créé, ou 400 `name` : il existe déjà (course) — succès.
 
-    # Filet de rattrapage : une course (deux requêtes concurrentes créant le
-    # même partage) ou le bug de statut HTTP décrit ci-dessus peuvent faire
-    # échouer le POST alors que le partage existe déjà bel et bien — revérifier
-    # avant d'abandonner, plutôt que de dépendre d'un code HTTP précis.
+    # Filet de rattrapage : autre réponse alors que le partage existe.
     try:
         list_members(namespace)
         return
     except StorageClientError:
         pass
     raise StorageClientError(f'Création du partage storage échouée (HTTP {resp.status_code}) : {resp.text[:200]}')
+
+
+def list_owned_shares() -> dict[str, str | None]:
+    """``{nom: parent}`` de chaque partage du compte de service
+    (``GET /api/shares/``, clé ``owned``) — lecture de l'état pour I3."""
+    try:
+        resp = requests.get(_shares_url(), headers=_headers(), timeout=_TIMEOUT)
+    except requests.RequestException as exc:
+        raise StorageClientError('storage injoignable (liste des partages).') from exc
+    if resp.status_code != 200:
+        raise StorageClientError(f'Liste des partages storage échouée (HTTP {resp.status_code}).')
+    return {s['name']: s.get('parent') for s in resp.json().get('owned', [])}
+
+
+def set_parent(namespace: str, parent: str) -> int:
+    """``PATCH /api/shares/<namespace>/ {parent}`` — rend le code HTTP, sans
+    l'interpréter (I3 décide : 200 fait, 404 ignoré, 400/403 échec)."""
+    try:
+        resp = requests.patch(
+            _shares_url(f'{namespace}/'), headers=_headers(), data={'parent': parent},
+            timeout=_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        raise StorageClientError('storage injoignable (rattachement).') from exc
+    return resp.status_code
 
 
 def list_members(namespace: str) -> list[dict]:
