@@ -903,3 +903,24 @@ class RienNeSeDevineTests(FamilyTreeCase):
         self.assertEqual(self.carol.delete(f'/api/media-links/{lien.pk}/').status_code, 404)
         self.assertTrue(MediaLink.objects.filter(pk=lien.pk).exists())
         self.assertEqual(self.storage.writes(), [])
+
+
+class ParametreIdentifiantTests(FamilyTreeCase):
+    """Un identifiant non entier en paramètre d'URL donne un 400, pas une erreur 500."""
+
+    def test_identifiant_non_entier_400(self):
+        modele = self.objects['card-templates']
+        urls = [f'/api/{prefix}/?tree=abc' for prefix in ROUTES] + [
+            '/api/tree-shares/?tree=abc',
+            '/api/events/?individual=abc',
+            '/api/events/?family=1%20OR%201',
+            f'/api/card-templates/{modele.pk}/preview/?individual=abc',
+        ]
+        for url in urls:
+            with self.subTest(url=url):
+                self.assertEqual(self.alice.get(url).status_code, 400)
+
+    def test_identifiant_entier_toujours_accepte(self):
+        resp = self.alice.get('/api/events/', {'individual': self.objects['individuals'].pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual({row['id'] for row in resp.json()}, {self.objects['events'].pk})

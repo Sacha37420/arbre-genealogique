@@ -122,7 +122,10 @@ class Provider:
                 timeout=TIMEOUT,
             )
         except requests.RequestException as exc:
-            raise ProviderError(f'{self.label} : service injoignable ({exc}).') from exc
+            # Message fixe : le texte d'une exception `requests` contient l'URL
+            # demandée, donc la clé du coffre passée en paramètre (Geni,
+            # MyHeritage) — elle repartirait vers le navigateur.
+            raise ProviderError(f'{self.label} : service injoignable.') from exc
 
         if response.status_code in (401, 403):
             raise ProviderError(
