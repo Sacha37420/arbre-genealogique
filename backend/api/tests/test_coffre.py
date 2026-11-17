@@ -8,6 +8,8 @@ la requête ; une chaîne vide oublie la clé.
 import logging
 from unittest import mock
 
+import requests
+
 from cryptography.fernet import Fernet
 from django.db import connection
 from django.test import override_settings
@@ -168,3 +170,27 @@ class CoffreEtFournisseurTests(FamilyTreeCase):
                 'provider': 'geni', 'query': {'surname': 'Clemens'}}, format='json')
         self.assertTrue(http.called)
         self.assertEqual(http.call_args.kwargs['params']['access_token'], SECRET)
+
+    def test_panne_du_fournisseur_ne_renvoie_pas_la_cle(self):
+        # Le texte d'une exception `requests` reprend l'URL, et Geni y porte la
+        # clé (`?access_token=`) : la réponse ne doit pas la rendre.
+        panne = requests.ConnectionError(
+            f'Max retries exceeded with url: /api/profile/search?access_token={SECRET}')
+        with mock.patch('api.views.get_provider', wraps=providers.get_provider), \
+                mock.patch('api.providers.base.requests.get', side_effect=panne):
+            resp = self.alice.post('/api/enrich/search/', {
+                'provider': 'geni', 'query': {'surname': 'Clemens'}}, format='json')
+        self.assertEqual(resp.status_code, 502)
+        self.assertNotIn(SECRET.encode(), resp.content)
+
+    def test_panne_du_geocodeur_ne_renvoie_pas_la_cle(self):
+        cle = 'cle-geoapify-tres-secrete'
+        self.alice.put('/api/provider-credentials/nominatim/', {'geoapify_key': cle},
+                       format='json')
+        panne = requests.ConnectionError(
+            f'Max retries exceeded with url: /v1/geocode/search?text=Tours&apiKey={cle}')
+        with mock.patch('api.providers.geocoding.requests.get', side_effect=panne):
+            resp = self.alice.post(f'/api/places/{self.objects["places"].pk}/geocode/', {},
+                                   format='json')
+        self.assertEqual(resp.status_code, 502)
+        self.assertNotIn(cle.encode(), resp.content)

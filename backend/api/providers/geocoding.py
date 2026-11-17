@@ -88,7 +88,8 @@ class Geocoder:
                 url, params=params, headers={'User-Agent': USER_AGENT}, timeout=TIMEOUT,
             )
         except requests.RequestException as exc:
-            raise ProviderError(f'Géocodage injoignable ({exc}).') from exc
+            # Message fixe : l'exception porte l'URL, donc `apiKey` (Geoapify).
+            raise ProviderError('Géocodage injoignable.') from exc
 
         if response.status_code in (401, 403):
             raise ProviderError('Géocodage : clé Geoapify refusée.', status=401)

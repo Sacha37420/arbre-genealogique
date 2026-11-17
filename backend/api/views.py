@@ -112,6 +112,15 @@ class StorageUnavailable(APIException):
     default_code = 'storage_unavailable'
 
 
+def id_param(request, name: str) -> str | None:
+    """Identifiant passé en paramètre d'URL (`?tree=`, `?individual=`…) : 400 s'il
+    n'est pas un entier — passé tel quel à l'ORM, il levait une erreur 500."""
+    value = request.query_params.get(name)
+    if value and not (value.isascii() and value.isdigit()):
+        raise ValidationError({name: ['Identifiant entier attendu.']})
+    return value or None
+
+
 class MeView(APIView):
     """GET /api/me/ — identité de l'utilisateur, créée à la première visite."""
 
@@ -235,7 +244,7 @@ class OwnedTreeMixin(TreeOwnerMixin):
         qs = qs.filter(**{f'{self.tree_path}__in': trees})
 
         # ?tree=<id> — filtre systématique côté client, l'arbre courant.
-        tree_id = self.request.query_params.get('tree')
+        tree_id = id_param(self.request, 'tree')
         if tree_id:
             qs = qs.filter(**{self.tree_path: tree_id})
         return qs
@@ -659,7 +668,7 @@ class TreeShareViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset().filter(tree__in=self.owned_trees())
-        if tree_id := self.request.query_params.get('tree'):
+        if tree_id := id_param(self.request, 'tree'):
             qs = qs.filter(tree=tree_id)
         return qs
 
@@ -804,9 +813,9 @@ class EventViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
         qs = super().get_queryset()
         # L'éditeur d'une fiche ne veut que les événements de cette personne
         # (ou de ses familles, pour le mariage et le divorce).
-        if individual := self.request.query_params.get('individual'):
+        if individual := id_param(self.request, 'individual'):
             qs = qs.filter(individual=individual)
-        if family := self.request.query_params.get('family'):
+        if family := id_param(self.request, 'family'):
             qs = qs.filter(family=family)
         return qs
 
@@ -987,14 +996,30 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
             return Response({'detail': f'Stockage indisponible : {exc}'},
                             status=status.HTTP_502_BAD_GATEWAY)
 
+        # Le type vient de l'envoyeur (multipart, base64, GEDCOM) : servi tel
+        # quel sur l'origine de l'API, un HTML ou un SVG y exécuterait son script.
+        # Hors des types d'affichage sûrs : octets bruts, en pièce jointe.
+        mime = (media.mime or '').split(';', 1)[0].strip().lower()
+        inline = mime in INLINE_MIME_TYPES
         response = StreamingHttpResponse(
-            upstream.iter_content(chunk_size=65536), content_type=media.mime,
+            upstream.iter_content(chunk_size=65536),
+            content_type=media.mime if inline else 'application/octet-stream',
         )
+        response['X-Content-Type-Options'] = 'nosniff'
+        if not inline:
+            response['Content-Disposition'] = 'attachment'
         if media.size:
             response['Content-Length'] = str(media.size)
         # Immuable : le contenu d'un média ne change jamais, seule sa fiche évolue.
         response['Cache-Control'] = 'private, max-age=86400'
         return response
+
+
+#: Types de média servis en ligne par le proxy — ni HTML, ni SVG, ni XML.
+INLINE_MIME_TYPES = frozenset({
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif', 'image/bmp',
+    'image/tiff', 'application/pdf',
+})
 
 
 def demote_other_photos(link: MediaLink) -> None:
@@ -1118,7 +1143,7 @@ class CardTemplateViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
         from .graph import individual_card, resolve_style
 
         template = self.get_object()
-        individual_id = request.query_params.get('individual')
+        individual_id = id_param(request, 'individual')
 
         individual = (
             Individual.objects

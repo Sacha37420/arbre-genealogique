@@ -216,6 +216,28 @@ class UrlTests(FamilyTreeCase):
         self.assertEqual(self.url(self.alice, self.objects),
                          f"/api/media/{self.objects['media'].pk}/file/")
 
+    def test_proxy_ne_sert_pas_en_ligne_un_type_actif(self):
+        # Le type est celui annoncé par l'envoyeur : un HTML ou un SVG ne doit
+        # pas être rendu comme page sur l'origine de l'API.
+        for mime in ('text/html', 'image/svg+xml', 'IMAGE/SVG+XML; charset=utf-8'):
+            with self.subTest(mime=mime):
+                media = MediaObject.objects.create(
+                    tree=self.public, title='piège', filename='p.html', mime=mime,
+                    storage_path='media/piege', size=6)
+                self.storage.files[ns(self.public)]['media/piege'] = b'<html>'
+                resp = self.dave.get(f'/api/media/{media.pk}/file/')
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(resp['Content-Type'], 'application/octet-stream')
+                self.assertEqual(resp['Content-Disposition'], 'attachment')
+                self.assertEqual(resp['X-Content-Type-Options'], 'nosniff')
+                self.assertEqual(b''.join(resp.streaming_content), b'<html>')
+
+    def test_proxy_sert_une_image_en_ligne(self):
+        resp = self.dave.get(f"/api/media/{self.public_objects['media'].pk}/file/")
+        self.assertEqual(resp['Content-Type'], 'image/jpeg')
+        self.assertNotIn('Content-Disposition', resp)
+        self.assertEqual(resp['X-Content-Type-Options'], 'nosniff')
+
     def test_media_externe_son_adresse_telle_quelle(self):
         externe = MediaObject.objects.create(tree=self.tree, external_url='https://example.org/a.jpg')
         self.assertEqual(storage_client.media_url(externe), 'https://example.org/a.jpg')
