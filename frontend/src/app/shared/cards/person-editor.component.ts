@@ -395,7 +395,32 @@ export class PersonEditorComponent {
     });
   }
 
-  removeSpouse(linkId: number): void {
+  /**
+   * Fermer l'éditeur abandonne la saisie non enregistrée (identité, événements,
+   * type d'union) : on le dit avant, plutôt que de la perdre en silence.
+   */
+  close(): void {
+    if (this.dirty() && !confirm('Fermer sans enregistrer ? Les modifications en cours seront perdues.')) {
+      return;
+    }
+    this.closed.emit();
+  }
+
+  /**
+   * Retirer un lien part immédiatement, et une famille qui ne relie plus
+   * personne disparaît avec ses événements (mariage, divorce) : d'où la
+   * confirmation. Les personnes, elles, restent dans l'arbre.
+   */
+  private confirmUnlink(name: string): boolean {
+    return confirm(
+      `Retirer le lien avec ${name || 'cette personne'} ?\n\n` +
+        'La personne reste dans l’arbre. Une union qui ne relie plus personne est ' +
+        'supprimée avec ses dates de mariage et de fin.',
+    );
+  }
+
+  removeSpouse(linkId: number, name = ''): void {
+    if (!this.confirmUnlink(name)) return;
     this.busy.set('Suppression du lien…');
     this.api.removeSpouseLink(linkId).subscribe({
       next: () => this.reloadRelations(),
@@ -406,7 +431,8 @@ export class PersonEditorComponent {
     });
   }
 
-  removeChild(linkId: number): void {
+  removeChild(linkId: number, name = ''): void {
+    if (!this.confirmUnlink(name)) return;
     this.busy.set('Suppression du lien…');
     this.api.removeChildLink(linkId).subscribe({
       next: () => this.reloadRelations(),

@@ -75,11 +75,49 @@ function readStoredId(): number | null {
   return Number.isFinite(id) ? id : null;
 }
 
-/** Extrait un message lisible d'une erreur HTTP DRF. */
+/**
+ * Extrait un message lisible d'une erreur HTTP DRF.
+ *
+ * DRF répond `{"detail": "…"}`, `["…"]` (ValidationError sur un texte) ou
+ * `{"champ": ["…"]}` : les trois portent le message à montrer. Un corps qui
+ * n'est pas un message (page HTML d'un proxy, trace) n'est jamais affiché, et
+ * le message technique d'Angular (« Http failure response for <url> … ») non
+ * plus : on retombe alors sur un texte qui dit quoi faire.
+ */
 export function describeError(err: unknown): string {
-  const error = err as { error?: { detail?: string } | string; message?: string; status?: number };
-  if (typeof error?.error === 'string') return error.error;
-  if (error?.error?.detail) return error.error.detail;
-  if (error?.status === 0) return 'Serveur injoignable.';
-  return error?.message ?? 'Erreur inattendue.';
+  const error = err as { error?: unknown; status?: number };
+  const fromBody = messageFrom(error?.error);
+  if (fromBody) return fromBody;
+  switch (error?.status) {
+    case 0:
+      return 'Serveur injoignable. Vérifiez votre connexion, puis réessayez.';
+    case 401:
+      return 'Votre session a expiré : rechargez la page pour vous reconnecter.';
+    case 403:
+      return 'Vous n’avez pas le droit de faire cela sur cet arbre.';
+    case 404:
+      return 'Élément introuvable : il a peut-être été supprimé entre-temps.';
+    case 413:
+      return 'Fichier trop volumineux.';
+  }
+  if ((error?.status ?? 0) >= 500) {
+    return 'Le serveur a rencontré un problème. Réessayez dans un instant.';
+  }
+  return 'Erreur inattendue. Réessayez.';
+}
+
+function messageFrom(body: unknown): string {
+  if (typeof body === 'string') {
+    const text = body.trim();
+    return text && !text.startsWith('<') && text.length <= 300 ? text : '';
+  }
+  if (Array.isArray(body)) {
+    return body.map(messageFrom).filter(Boolean).join(' ');
+  }
+  if (body && typeof body === 'object') {
+    const detail = (body as { detail?: unknown }).detail;
+    if (detail !== undefined) return messageFrom(detail);
+    return Object.values(body).map(messageFrom).filter(Boolean).join(' ');
+  }
+  return '';
 }

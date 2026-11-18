@@ -106,6 +106,23 @@ class DepotTests(FamilyTreeCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(MediaObject.objects.count(), avant)
 
+    def test_storage_en_panne_le_message_ne_livre_rien_de_l_interne(self):
+        # L'erreur de `requests` porte l'adresse interne de storage : le corps
+        # rendu au navigateur doit rester un message fixe.
+        self.storage.down = True
+        resp = self.alice.post('/api/media/', {'tree': self.tree.pk, 'file': fichier()},
+                               format='multipart')
+        self.assertEqual((resp.status_code, resp.json()), (502, {'detail': 'Stockage indisponible.'}))
+        resp = self.alice.post('/api/media/', {'tree': self.tree.pk, 'data_base64': 'QUJD'},
+                               format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertNotIn('simulé', resp.content.decode())
+        resp = self.alice.get(f"/api/media/{self.objects['media'].pk}/file/")
+        self.assertEqual((resp.status_code, resp.json()), (502, {'detail': 'Stockage indisponible.'}))
+        resp = self.alice.post('/api/tree-shares/', {'tree': self.tree.pk, 'email': DAVE},
+                               format='json')
+        self.assertEqual((resp.status_code, resp.json()), (502, {'detail': 'Stockage indisponible.'}))
+
     def test_remplacer_le_contenu_purge_l_ancien(self):
         media = self.objects['media']
         ancien = media.storage_path

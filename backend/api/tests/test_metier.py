@@ -324,6 +324,45 @@ class FamilleTests(FamilyTreeCase):
         r3 = self.bob.post(f'/api/families/{vide.pk}/add_child/', {}, format='json')
         self.assertEqual(r3.status_code, 400)
 
+    def test_un_remariage_ouvre_une_nouvelle_union_sans_toucher_aux_enfants(self):
+        resp = self.proche(self.pere, relation='SPOUSE', givn='Claire', surn='Roy', sex='F')
+        self.assertEqual(resp.status_code, 201, resp.content)
+        unions = resp.json()['spouse_families']
+        self.assertEqual(len(unions), 2)
+        nouvelle = next(u for u in unions if u['family'] != self.famille.pk)
+        self.assertEqual([s['name'] for s in nouvelle['spouses']], ['Claire Roy'])
+        self.assertEqual(nouvelle['children'], [])
+        # Le premier couple et ses enfants sont intacts : Paul n'a toujours que deux parents.
+        self.assertEqual({s.individual_id for s in self.famille.spouses.all()},
+                         {self.pere.pk, self.mere.pk})
+        # Redire le même couple ne crée pas une troisième union.
+        claire = nouvelle['spouses'][0]['id']
+        resp = self.proche(self.pere, relation='SPOUSE', individual=claire)
+        self.assertEqual(len(resp.json()['spouse_families']), 2)
+        resp = self.proche(self.pere, relation='SPOUSE', individual=self.mere.pk)
+        self.assertEqual(len(resp.json()['spouse_families']), 2)
+
+    def test_un_conjoint_complete_l_union_d_un_parent_seul(self):
+        seul = Individual.objects.create(tree=self.tree, sex='F')
+        famille = Family.objects.create(tree=self.tree)
+        FamilySpouse.objects.create(family=famille, individual=seul, role='WIFE')
+        FamilyChild.objects.create(family=famille, individual=self.enfant)
+        resp = self.proche(seul, relation='SPOUSE', givn='Marc', sex='M')
+        self.assertEqual(resp.status_code, 201, resp.content)
+        unions = resp.json()['spouse_families']
+        self.assertEqual([u['family'] for u in unions], [famille.pk])
+        self.assertEqual([s['name'] for s in unions[0]['spouses']], ['Marc'])
+
+    def test_ajout_direct_d_un_enfant_filiation_hors_gedcom_ramenee_au_defaut(self):
+        vide = self.objects['_famille2']
+        r1 = self.bob.post(f'/api/families/{vide.pk}/add_child/',
+                           {'individual': self.enfant.pk, 'pedigree': 'nimporte'}, format='json')
+        self.assertEqual(r1.status_code, 201, r1.content)
+        self.assertEqual(r1.json()['pedigree'], 'BIRTH')
+        r2 = self.bob.post(f'/api/families/{vide.pk}/add_child/',
+                           {'individual': self.mere.pk, 'pedigree': 'ADOPTED'}, format='json')
+        self.assertEqual(r2.json()['pedigree'], 'ADOPTED')
+
     def test_personne_creee_avec_son_nom(self):
         resp = self.bob.post('/api/individuals/', {
             'tree': self.tree.pk, 'givn': 'Luc', 'surn': 'Martin', 'sex': 'M'}, format='json')
@@ -624,3 +663,20 @@ class FusionExterneTests(FamilyTreeCase):
         parents = {s.individual_id for s in nina.families_as_child.get().family.spouses.all()}
         self.assertEqual(parents, {ids['FATHER'], ids['MOTHER']})
         self.assertEqual(nina.families_as_spouse.get().family.spouses.count(), 2)
+
+    def test_un_lieu_de_deces_sans_date_suffit_a_marquer_le_deces(self):
+        resultat = PersonResult(provider='wikitree', external_id='P-1', given_name='Pia',
+                                surname='Roux', death_place='Nantes')
+        resp = self.importer(resultat)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        pia = Individual.objects.get(pk=resp.json()['individual']['id'])
+        self.assertEqual(pia.events.get(tag='DEAT').place.name, 'Nantes')
+        self.assertFalse(pia.is_living)
+        # Même règle quand la fiche complète une personne existante.
+        mere = self.objects['_mere']
+        resultat = PersonResult(provider='wikitree', external_id='P-2', given_name='Marie',
+                                surname='Durand', death_place='Angers')
+        self.assertEqual(self.importer(resultat, target=mere.pk).status_code, 201)
+        mere.refresh_from_db()
+        self.assertTrue(mere.events.filter(tag='DEAT').exists())
+        self.assertFalse(mere.is_living)

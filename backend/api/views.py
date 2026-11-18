@@ -624,11 +624,14 @@ class FamilyViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
     def add_child(self, request, pk=None):
         family = self.get_object()
         individual = self._individual(request, family)
+        # Même défaut sûr que « ajouter un proche » : une valeur hors GEDCOM
+        # (PEDI) n'entre pas en base, où rien d'autre ne la vérifie.
+        pedigree = request.data.get('pedigree')
         link, _ = FamilyChild.objects.get_or_create(
             family=family,
             individual=individual,
             defaults={
-                'pedigree': request.data.get('pedigree', 'BIRTH'),
+                'pedigree': pedigree if pedigree in Pedigree.values else Pedigree.BIRTH,
                 'order': family.children.count(),
             },
         )
@@ -703,7 +706,9 @@ class TreeShareViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
                 # « actif » côté app mais invisible pour storage.
                 storage_client.sync_tree_share(tree)
         except storage_client.StorageClientError as exc:
-            raise StorageUnavailable(f'Stockage indisponible : {exc}')
+            # Message fixe : l'erreur d'origine porte l'adresse interne de storage.
+            logger.warning('Synchronisation storage échouée pour l’arbre %s : %s', tree.pk, exc)
+            raise StorageUnavailable() from exc
         return Response(self.get_serializer(share).data, status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):
@@ -721,7 +726,10 @@ class TreeShareViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
                 serializer.save()
                 storage_client.sync_tree_share(serializer.instance.tree)
         except storage_client.StorageClientError as exc:
-            raise StorageUnavailable(f'Stockage indisponible : {exc}')
+            # Message fixe : l'erreur d'origine porte l'adresse interne de storage.
+            logger.warning('Synchronisation storage échouée pour l’arbre %s : %s',
+                           serializer.instance.tree_id, exc)
+            raise StorageUnavailable() from exc
 
     def perform_destroy(self, instance):
         self.check_owner(instance.tree)
@@ -731,7 +739,9 @@ class TreeShareViewSet(TreeOwnerMixin, viewsets.ModelViewSet):
                 super().perform_destroy(instance)
                 storage_client.sync_tree_share(tree)
         except storage_client.StorageClientError as exc:
-            raise StorageUnavailable(f'Stockage indisponible : {exc}')
+            # Message fixe : l'erreur d'origine porte l'adresse interne de storage.
+            logger.warning('Synchronisation storage échouée pour l’arbre %s : %s', tree.pk, exc)
+            raise StorageUnavailable() from exc
 
 
 def prune_family(family: Family | None) -> None:
@@ -905,7 +915,9 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
                 blob, upload.name, mime, namespace=storage_client.namespace_for_tree(tree.pk),
             )
         except storage_client.StorageClientError as exc:
-            return Response({'detail': f'Stockage indisponible : {exc}'},
+            # Message fixe : l'erreur d'origine porte l'adresse interne de storage.
+            logger.warning('Appel storage échoué : %s', exc)
+            return Response({'detail': StorageUnavailable.default_detail},
                             status=status.HTTP_502_BAD_GATEWAY)
         media = MediaObject.objects.create(
             tree=tree,
@@ -984,7 +996,9 @@ class MediaObjectViewSet(OwnedTreeMixin, viewsets.ModelViewSet):
                 media.storage_path, namespace=storage_client.namespace_for_tree(media.tree_id),
             )
         except storage_client.StorageClientError as exc:
-            return Response({'detail': f'Stockage indisponible : {exc}'},
+            # Message fixe : l'erreur d'origine porte l'adresse interne de storage.
+            logger.warning('Appel storage échoué : %s', exc)
+            return Response({'detail': StorageUnavailable.default_detail},
                             status=status.HTTP_502_BAD_GATEWAY)
 
         response = StreamingHttpResponse(
@@ -1651,6 +1665,31 @@ def _family_as_spouse(individual: Individual, create: bool = False) -> Family | 
     return family
 
 
+def _family_for_new_spouse(individual: Individual, other: Individual) -> Family:
+    """
+    Famille qui accueille un conjoint ajouté : jamais l'union d'un autre couple.
+
+    Une union où la personne a déjà un conjoint est celle d'un autre couple : y
+    verser le nouveau conjoint en ferait le parent des enfants de cette union (un
+    remariage donnait trois « parents » aux enfants du premier lit). On reprend
+    donc l'union déjà commune aux deux, sinon une union où la personne est seule
+    (parent isolé : le conjoint vient la compléter), sinon une nouvelle famille.
+    """
+    alone = None
+    for link in individual.families_as_spouse.select_related('family'):
+        others = {s.individual_id for s in link.family.spouses.all()} - {individual.pk}
+        if other.pk in others:
+            return link.family
+        if not others and alone is None:
+            alone = link.family
+    if alone is not None:
+        return alone
+
+    family = Family.objects.create(tree=individual.tree)
+    FamilySpouse.objects.create(family=family, individual=individual, role=_role_for(individual))
+    return family
+
+
 def link_relative(
     individual: Individual,
     other: Individual,
@@ -1666,7 +1705,9 @@ def link_relative(
     """
     if relation in ('PARENT', 'SIBLING'):
         family = _family_as_child(individual, create=True)
-    else:  # SPOUSE, CHILD
+    elif relation == 'SPOUSE':
+        family = _family_for_new_spouse(individual, other)
+    else:  # CHILD
         family = _family_as_spouse(individual, create=True)
 
     if relation == 'PARENT':
@@ -1713,7 +1754,9 @@ def _create_individual(tree: Tree, result) -> Individual:
             tree=tree, individual=individual, tag=EventTag.OCCU,
             value=result.occupation, category=category_for(EventTag.OCCU),
         )
-    if result.death_date:
+    # Un lieu de décès sans date crée lui aussi l'événement DEAT (_add_event) :
+    # la personne est décédée dans les deux cas.
+    if result.death_date or result.death_place:
         individual.is_living = False
         individual.save(update_fields=['is_living'])
     return individual
@@ -1750,7 +1793,7 @@ def _merge(individual: Individual, result) -> None:
         _add_event(tree, individual, EventTag.BIRT, result.birth_date, result.birth_place)
     if not individual.events.filter(tag=EventTag.DEAT).exists():
         _add_event(tree, individual, EventTag.DEAT, result.death_date, result.death_place)
-        if result.death_date:
+        if result.death_date or result.death_place:
             individual.is_living = False
             changed.append('is_living')
 
