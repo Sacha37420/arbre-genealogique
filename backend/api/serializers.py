@@ -1,5 +1,6 @@
 """Sérialiseurs DRF. Les écritures de dates passent toutes par le parseur GEDCOM."""
 import hashlib
+import logging
 
 from rest_framework import serializers
 
@@ -34,6 +35,8 @@ from .models import (
     TreeViewSettings,
     UserRecord,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class UserRecordSerializer(serializers.ModelSerializer):
@@ -218,7 +221,9 @@ class MediaObjectSerializer(serializers.ModelSerializer):
             # pas cette erreur, contrairement au chemin multipart de
             # MediaObjectViewSet.create) : sans ce filet, une panne storage remonte
             # en 500 brut au lieu d'une erreur DRF propre.
-            raise serializers.ValidationError(f'Stockage indisponible : {exc}')
+            # Message fixe : l'erreur d'origine porte l'adresse interne de storage.
+            logger.warning('Envoi storage échoué : %s', exc)
+            raise serializers.ValidationError('Stockage indisponible.') from exc
         validated['size'] = len(blob)
         validated['checksum'] = hashlib.sha256(blob).hexdigest()
         return validated

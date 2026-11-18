@@ -164,6 +164,12 @@
 
   <!-- ── Options d'import ────────────────────────────────────────────────── -->
   <section class="import-options">
+    @if (store.currentId() !== null && !isOwner()) {
+      <p class="hint">
+        Cet arbre vous est partagé : vous pouvez chercher et consulter des fiches, mais seul
+        son propriétaire peut les importer.
+      </p>
+    }
     <label class="row">
       <span>Importer vers</span>
       <select class="select" [ngModel]="target()" (ngModelChange)="target.set($event)">
@@ -181,10 +187,10 @@
 
     <label class="check">
       <input type="checkbox" [ngModel]="withPhoto()" (ngModelChange)="withPhoto.set($event)" />
-      Télécharger le portrait dans la base
+      Télécharger aussi le portrait
     </label>
 
-    <button type="button" class="btn ghost" (click)="geocodeAll()" [disabled]="store.currentId() === null">
+    <button type="button" class="btn ghost" (click)="geocodeAll()" [disabled]="store.currentId() === null || store.current()?.my_role === 'VIEWER'">
       Géocoder les lieux de l’arbre
     </button>
   </section>
@@ -249,7 +255,8 @@
                 type="button"
                 class="btn primary"
                 (click)="importResult(result)"
-                [disabled]="importing() === result.external_id || store.currentId() === null"
+                [disabled]="importing() === result.external_id || store.currentId() === null || !isOwner()"
+                [title]="isOwner() ? '' : 'Seul le propriétaire de l’arbre peut y importer une fiche'"
               >
                 {{ importing() === result.external_id ? 'Import…' : 'Importer' }}
               </button>
@@ -319,7 +326,8 @@
             type="button"
             class="btn primary"
             (click)="importResult(person); closeDetail()"
-            [disabled]="store.currentId() === null"
+            [disabled]="store.currentId() === null || !isOwner()"
+            [title]="isOwner() ? '' : 'Seul le propriétaire de l’arbre peut y importer une fiche'"
           >
             Importer dans l’arbre
           </button>

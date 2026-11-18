@@ -1,7 +1,7 @@
 <article class="editor">
   <header>
     <h2>Modifier la fiche</h2>
-    <button type="button" class="close" (click)="closed.emit()" aria-label="Fermer">×</button>
+    <button type="button" class="close" (click)="close()" aria-label="Fermer">×</button>
   </header>
 
   @if (loading()) {
@@ -132,7 +132,7 @@
               <div class="person-row">
                 <span class="role">{{ parent.role === 'HUSB' ? 'Père' : parent.role === 'WIFE' ? 'Mère' : 'Parent' }}</span>
                 <span class="who">{{ parent.name }}</span>
-                <button type="button" class="icon danger" (click)="removeSpouse(parent.link)" aria-label="Retirer">×</button>
+                <button type="button" class="icon danger" (click)="removeSpouse(parent.link, parent.name)" [attr.aria-label]="'Retirer le lien avec ' + parent.name">×</button>
               </div>
             }
             @for (sibling of family.siblings; track sibling.link) {
@@ -148,7 +148,7 @@
                     <option [value]="type.value">{{ type.label }}</option>
                   }
                 </select>
-                <button type="button" class="icon danger" (click)="removeChild(sibling.link)" aria-label="Retirer">×</button>
+                <button type="button" class="icon danger" (click)="removeChild(sibling.link, sibling.name)" [attr.aria-label]="'Retirer le lien avec ' + sibling.name">×</button>
               </div>
             }
           }
@@ -198,7 +198,7 @@
                 <div class="person-row">
                   <span class="role">Conjoint·e</span>
                   <span class="who">{{ spouse.name }}</span>
-                  <button type="button" class="icon danger" (click)="removeSpouse(spouse.link)" aria-label="Retirer">×</button>
+                  <button type="button" class="icon danger" (click)="removeSpouse(spouse.link, spouse.name)" [attr.aria-label]="'Retirer le lien avec ' + spouse.name">×</button>
                 </div>
               }
               @if (!family.spouses.length) {
@@ -282,7 +282,7 @@
                       <option [value]="type.value">{{ type.label }}</option>
                     }
                   </select>
-                  <button type="button" class="icon danger" (click)="removeChild(child.link)" aria-label="Retirer">×</button>
+                  <button type="button" class="icon danger" (click)="removeChild(child.link, child.name)" [attr.aria-label]="'Retirer le lien avec ' + child.name">×</button>
                 </div>
               }
 
@@ -463,7 +463,7 @@
         Supprimer la personne
       </button>
       <span class="spacer"></span>
-      <button type="button" class="btn" (click)="closed.emit()">Fermer</button>
+      <button type="button" class="btn" (click)="close()">Fermer</button>
       <button type="button" class="btn primary" (click)="save()" [disabled]="saving() || !dirty()">
         {{ saving() ? 'Enregistrement…' : 'Enregistrer' }}
       </button>

@@ -81,6 +81,13 @@ export class SearchComponent {
   /** Fournisseurs interrogeables : le géocodeur ne cherche pas de personnes. */
   readonly searchable = computed(() => this.providers().filter((p) => p.supports_search));
 
+  /**
+   * L'import dans un arbre (et la conservation des candidats) est réservé à son
+   * propriétaire côté serveur : sur un arbre partagé, la recherche reste ouverte,
+   * mais sans arbre, et l'import est désactivé plutôt que refusé après coup.
+   */
+  readonly isOwner = computed(() => this.store.current()?.my_role === 'OWNER');
+
   readonly missingKey = computed(() => {
     const provider = this.provider();
     if (!provider?.requires_key) return false;
@@ -205,7 +212,7 @@ export class SearchComponent {
     this.api
       .searchProvider({
         provider: this.providerKey(),
-        tree: this.store.currentId() ?? undefined,
+        tree: this.isOwner() ? (this.store.currentId() ?? undefined) : undefined,
         query: {
           given_name: this.given().trim(),
           surname: this.surname().trim(),
@@ -214,7 +221,7 @@ export class SearchComponent {
           place: this.place().trim(),
           limit: 15,
         },
-        save: this.store.currentId() !== null,
+        save: this.isOwner() && this.store.currentId() !== null,
       })
       .subscribe({
         next: (response) => {
@@ -252,6 +259,10 @@ export class SearchComponent {
     const treeId = this.store.currentId();
     if (treeId === null) {
       this.error.set('Sélectionnez d’abord un arbre.');
+      return;
+    }
+    if (!this.isOwner()) {
+      this.error.set('Seul le propriétaire de l’arbre peut y importer une fiche.');
       return;
     }
 

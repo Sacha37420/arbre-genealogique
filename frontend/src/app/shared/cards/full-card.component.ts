@@ -21,7 +21,7 @@ import { AuthSrcDirective } from '../auth-src.directive';
   imports: [NgStyle, TimelineComponent, AuthSrcDirective],
   styleUrl: './full-card.component.scss',
   template: `
-    <article class="full" [style.background]="template()?.background_color || '#fff'">
+    <article class="full" [style.background]="template()?.background_color || 'var(--card)'">
       <header>
         @if (template()?.photo_position !== 'NONE') {
           <div class="photo" [ngStyle]="photoStyle()">
